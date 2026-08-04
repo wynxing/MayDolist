@@ -11,6 +11,17 @@
   --ok: #5fc98a;
 }
 
+:root[data-theme="light"] {
+  --bg: rgba(244, 246, 250, 0.82);
+  --card: rgba(0, 0, 0, 0.05);
+  --card-hover: rgba(0, 0, 0, 0.09);
+  --border: rgba(0, 0, 0, 0.14);
+  --text: #20232b;
+  --muted: #687083;
+  --accent: #2869d8;
+  --accent-soft: rgba(40, 105, 216, 0.14);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -289,6 +300,7 @@ textarea.input {
   padding: 2px 8px;
   font-size: 12px;
 }
+.move-select { max-width: 92px; font-size: 11px; padding: 3px; }
 
 .empty {
   color: var(--muted);
@@ -538,3 +550,18 @@ textarea.input {
 .state.closed {
   color: var(--muted);
 }
+
+.settings { max-width: 620px; display: flex; flex-direction: column; gap: 12px; }
+.settings label { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.trash-row { display: flex; align-items: center; gap: 8px; padding: 7px; background: var(--card); border-radius: 8px; }
+.trash-row span { flex: 1; }
+.filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); }
+.gh-link { display: flex; width: 100%; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; gap: 8px; }
+.gh-link:hover { background: var(--card-hover); }
+.gh-link small { margin-left: auto; color: var(--accent); }
+.floating { height: 100%; display: flex; flex-direction: column; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
+.floating header { display: flex; align-items: center; height: 30px; gap: 6px; }
+.floating-title { flex: 1; border: 0; outline: 0; background: transparent; font-weight: 600; }
+.floating header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.floating textarea { flex: 1; margin-top: 6px; }
+.floating.collapsed { padding-bottom: 4px; }

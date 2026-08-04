@@ -13,7 +13,7 @@ use tauri::Manager;
 use services::Services;
 use storage::Storage;
 
-/// Shared application state: real storage layer + mock domain services.
+/// Shared application state: storage and persistent domain services.
 pub struct AppState {
     pub storage: Arc<Storage>,
     pub services: Services,
@@ -30,6 +30,16 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            app::show_main(app).ok();
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .args(["--autostart"])
+                .build(),
+        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|tauri_app| {
             app::setup(tauri_app)?;
             let state = tauri_app.state::<AppState>();
@@ -40,30 +50,50 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState {
-            storage,
-            services: Services::mock(),
+            storage: storage.clone(),
+            services: Services::new(storage),
         })
         .invoke_handler(tauri::generate_handler![
             commands::config::get_config,
             commands::config::get_data_dir,
             commands::config::set_config,
+            app::app_get_bootstrap,
+            app::app_show_main,
+            app::app_hide_main,
+            app::app_quit,
+            app::open_external,
+            commands::settings::settings_get,
+            commands::settings::settings_update,
+            commands::settings::settings_migrate_data_dir,
+            commands::settings::settings_set_autostart,
             commands::todo::todo_list,
             commands::todo::todo_create_list,
+            commands::todo::todo_update_list,
+            commands::todo::todo_reorder_lists,
             commands::todo::todo_create_item,
             commands::todo::todo_update_item,
+            commands::todo::todo_move_item,
+            commands::todo::todo_reorder_items,
             commands::todo::todo_soft_delete,
             commands::note::note_list,
+            commands::note::note_get,
             commands::note::note_create,
             commands::note::note_update,
-            commands::snippet::snippet_list,
-            commands::snippet::snippet_create,
-            commands::snippet::snippet_update,
-            commands::snippet::snippet_delete,
-            commands::github::github_auth_status,
+            commands::note::note_soft_delete,
+            commands::note::note_show_floating,
+            commands::note::note_dock,
+            commands::note::note_update_window_state,
+            commands::trash::trash_list,
+            commands::trash::trash_restore,
+            commands::trash::trash_delete_permanently,
+            commands::github::github_status,
             commands::github::github_watchlist,
             commands::github::github_watch_add,
             commands::github::github_watch_remove,
-            commands::github::github_refresh,
+            commands::github::github_watch_filters,
+            commands::github::github_refresh_repo,
+            commands::github::github_refresh_all,
+            commands::github::github_get_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

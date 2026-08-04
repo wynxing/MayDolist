@@ -7,26 +7,28 @@ pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub schema_version: u32,
-    /// Reserved for a user-configurable data directory. The skeleton resolves
-    /// the data dir from `MAYDOLIST_DATA_DIR` (env) or the default location.
-    pub data_dir: Option<String>,
+    pub data_dir: String,
     /// Hot-corner used to summon the main panel (e.g. "top-right").
     pub hot_corner: String,
     /// Global hotkey for the main panel (e.g. "Ctrl+Alt+M").
     pub hotkey: String,
     pub theme: String,
     pub github_refresh_interval_minutes: u32,
+    pub autostart: bool,
+    pub first_run: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
-            data_dir: None,
+            data_dir: String::new(),
             hot_corner: "top-right".into(),
             hotkey: "Ctrl+Alt+M".into(),
-            theme: "acrylic-dark".into(),
+            theme: "system".into(),
             github_refresh_interval_minutes: 30,
+            autostart: false,
+            first_run: true,
         }
     }
 }

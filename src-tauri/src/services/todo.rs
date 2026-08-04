@@ -1,174 +1,205 @@
-use std::sync::Mutex;
-
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
 use crate::models::{TodoItem, TodoList};
+use crate::storage::Storage;
 
-pub trait TodoService: Send + Sync {
-    fn list(&self) -> Vec<TodoList>;
-    fn create_list(&self, title: String) -> AppResult<TodoList>;
-    fn create_item(&self, list_id: &str, title: String) -> AppResult<TodoItem>;
-    fn update_item(
-        &self,
-        id: &str,
-        title: Option<String>,
-        completed: Option<bool>,
-    ) -> AppResult<TodoItem>;
-    fn soft_delete_item(&self, id: &str) -> AppResult<()>;
+pub struct TodoService {
+    storage: Arc<Storage>,
 }
 
-/// In-memory mock. Business data is not persisted in the skeleton phase.
-pub struct MockTodoService {
-    lists: Mutex<Vec<TodoList>>,
-}
-
-impl MockTodoService {
-    pub fn seeded() -> Self {
-        Self {
-            lists: Mutex::new(vec![
-                TodoList {
-                    id: "list-personal".into(),
-                    title: "个人".into(),
-                    items: vec![
-                        TodoItem {
-                            id: "todo-1".into(),
-                            title: "买牛奶".into(),
-                            completed: false,
-                            deleted: false,
-                            created_at: "2026-08-01T09:00:00Z".into(),
-                        },
-                        TodoItem {
-                            id: "todo-2".into(),
-                            title: "预约体检".into(),
-                            completed: true,
-                            deleted: false,
-                            created_at: "2026-08-01T09:05:00Z".into(),
-                        },
-                    ],
-                },
-                TodoList {
-                    id: "list-work".into(),
-                    title: "工作".into(),
-                    items: vec![TodoItem {
-                        id: "todo-3".into(),
-                        title: "评审 PR #1234".into(),
-                        completed: false,
-                        deleted: false,
-                        created_at: "2026-08-02T14:00:00Z".into(),
-                    }],
-                },
-            ]),
-        }
-    }
-}
-
-impl TodoService for MockTodoService {
-    fn list(&self) -> Vec<TodoList> {
-        let lists = self.lists.lock().unwrap();
-        let mut result = lists.clone();
-        for list in &mut result {
-            list.items.retain(|item| !item.deleted);
-        }
-        result
+impl TodoService {
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
     }
 
-    fn create_list(&self, title: String) -> AppResult<TodoList> {
-        let mut lists = self.lists.lock().unwrap();
+    pub fn list(&self, include_deleted: bool) -> AppResult<Vec<TodoList>> {
+        let mut lists: Vec<TodoList> = self.storage.list_json("todos")?;
+        if !include_deleted {
+            lists.retain(|list| !list.deleted);
+            for list in &mut lists {
+                list.items.retain(|item| !item.deleted);
+            }
+        }
+        lists.sort_by_key(|list| list.sort_order);
+        for list in &mut lists {
+            list.items.sort_by_key(|item| item.sort_order);
+        }
+        Ok(lists)
+    }
+
+    pub fn create_list(&self, title: String) -> AppResult<TodoList> {
+        validate_title(&title)?;
+        let now = now_rfc3339();
         let list = TodoList {
+            schema_version: 1,
             id: Uuid::new_v4().to_string(),
-            title,
-            items: Vec::new(),
+            title: title.trim().into(),
+            sort_order: self.list(true)?.len() as i32,
+            deleted: false,
+            created_at: now.clone(),
+            updated_at: now,
+            items: vec![],
         };
-        lists.push(list.clone());
+        self.save(&list)?;
         Ok(list)
     }
 
-    fn create_item(&self, list_id: &str, title: String) -> AppResult<TodoItem> {
-        let mut lists = self.lists.lock().unwrap();
-        let list = lists
-            .iter_mut()
-            .find(|list| list.id == list_id)
-            .ok_or_else(|| AppError::NotFound(format!("todo list {list_id}")))?;
+    pub fn update_list(
+        &self,
+        id: &str,
+        title: Option<String>,
+        deleted: Option<bool>,
+    ) -> AppResult<TodoList> {
+        let mut list = self.get(id)?;
+        if let Some(title) = title {
+            validate_title(&title)?;
+            list.title = title.trim().into();
+        }
+        if let Some(deleted) = deleted {
+            list.deleted = deleted;
+        }
+        list.updated_at = now_rfc3339();
+        self.save(&list)?;
+        Ok(list)
+    }
+
+    pub fn reorder_lists(&self, ids: &[String]) -> AppResult<Vec<TodoList>> {
+        let mut lists = self.list(true)?;
+        for (order, id) in ids.iter().enumerate() {
+            let list = lists
+                .iter_mut()
+                .find(|v| &v.id == id)
+                .ok_or_else(|| AppError::NotFound(format!("todo list {id}")))?;
+            list.sort_order = order as i32;
+            list.updated_at = now_rfc3339();
+            self.save(list)?;
+        }
+        self.list(false)
+    }
+
+    pub fn create_item(&self, list_id: &str, title: String) -> AppResult<TodoItem> {
+        validate_title(&title)?;
+        let mut list = self.get(list_id)?;
+        let now = now_rfc3339();
         let item = TodoItem {
             id: Uuid::new_v4().to_string(),
-            title,
+            title: title.trim().into(),
             completed: false,
             deleted: false,
-            created_at: now_rfc3339(),
+            sort_order: list.items.len() as i32,
+            created_at: now.clone(),
+            updated_at: now,
         };
         list.items.push(item.clone());
+        list.updated_at = now_rfc3339();
+        self.save(&list)?;
         Ok(item)
     }
 
-    fn update_item(
+    pub fn update_item(
         &self,
         id: &str,
         title: Option<String>,
         completed: Option<bool>,
+        deleted: Option<bool>,
     ) -> AppResult<TodoItem> {
-        let mut lists = self.lists.lock().unwrap();
-        let item = lists
-            .iter_mut()
-            .flat_map(|list| list.items.iter_mut())
-            .find(|item| item.id == id)
-            .ok_or_else(|| AppError::NotFound(format!("todo item {id}")))?;
-        if let Some(title) = title {
-            if title.trim().is_empty() {
-                return Err(AppError::InvalidInput("title must not be empty".into()));
+        let mut lists = self.list(true)?;
+        for list in &mut lists {
+            if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
+                if let Some(title) = title {
+                    validate_title(&title)?;
+                    item.title = title.trim().into();
+                }
+                if let Some(value) = completed {
+                    item.completed = value;
+                }
+                if let Some(value) = deleted {
+                    item.deleted = value;
+                }
+                item.updated_at = now_rfc3339();
+                let result = item.clone();
+                list.updated_at = now_rfc3339();
+                self.save(list)?;
+                return Ok(result);
             }
-            item.title = title;
         }
-        if let Some(completed) = completed {
-            item.completed = completed;
-        }
-        Ok(item.clone())
+        Err(AppError::NotFound(format!("todo item {id}")))
     }
 
-    fn soft_delete_item(&self, id: &str) -> AppResult<()> {
-        let mut lists = self.lists.lock().unwrap();
-        let item = lists
+    pub fn move_item(&self, id: &str, target_list_id: &str, index: usize) -> AppResult<TodoItem> {
+        let mut lists = self.list(true)?;
+        let mut found = None;
+        for list in &mut lists {
+            if let Some(pos) = list.items.iter().position(|v| v.id == id) {
+                found = Some(list.items.remove(pos));
+                break;
+            }
+        }
+        let item = found.ok_or_else(|| AppError::NotFound(format!("todo item {id}")))?;
+        let target = lists
             .iter_mut()
-            .flat_map(|list| list.items.iter_mut())
-            .find(|item| item.id == id)
-            .ok_or_else(|| AppError::NotFound(format!("todo item {id}")))?;
-        item.deleted = true;
-        Ok(())
+            .find(|v| v.id == target_list_id)
+            .ok_or_else(|| AppError::NotFound(format!("todo list {target_list_id}")))?;
+        let at = index.min(target.items.len());
+        target.items.insert(at, item.clone());
+        for list in &mut lists {
+            for (order, row) in list.items.iter_mut().enumerate() {
+                row.sort_order = order as i32;
+            }
+            list.updated_at = now_rfc3339();
+            self.save(list)?;
+        }
+        Ok(item)
+    }
+
+    pub fn reorder_items(&self, list_id: &str, ids: &[String]) -> AppResult<TodoList> {
+        let mut list = self.get(list_id)?;
+        for (order, id) in ids.iter().enumerate() {
+            let item = list
+                .items
+                .iter_mut()
+                .find(|v| &v.id == id)
+                .ok_or_else(|| AppError::NotFound(format!("todo item {id}")))?;
+            item.sort_order = order as i32;
+        }
+        list.updated_at = now_rfc3339();
+        self.save(&list)?;
+        Ok(list)
+    }
+
+    pub fn permanent_delete(&self, kind: &str, id: &str) -> AppResult<()> {
+        if kind == "todoList" {
+            return self.storage.delete_entity("todos", id);
+        }
+        let mut lists = self.list(true)?;
+        for list in &mut lists {
+            if let Some(pos) = list.items.iter().position(|v| v.id == id) {
+                list.items.remove(pos);
+                self.save(list)?;
+                return Ok(());
+            }
+        }
+        Err(AppError::NotFound(id.into()))
+    }
+
+    fn get(&self, id: &str) -> AppResult<TodoList> {
+        self.list(true)?
+            .into_iter()
+            .find(|v| v.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("todo list {id}")))
+    }
+    fn save(&self, list: &TodoList) -> AppResult<()> {
+        self.storage.save_entity("todos", &list.id, list)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn todo_crud_flow() {
-        let service = MockTodoService::seeded();
-        assert_eq!(service.list().len(), 2);
-
-        let list = service.create_list("购物".into()).unwrap();
-        let item = service.create_item(&list.id, "纸巾".into()).unwrap();
-        assert_eq!(service.list().iter().find(|l| l.id == list.id).unwrap().items.len(), 1);
-
-        let updated = service.update_item(&item.id, Some("抽纸".into()), Some(true)).unwrap();
-        assert_eq!(updated.title, "抽纸");
-        assert!(updated.completed);
-
-        service.soft_delete_item(&item.id).unwrap();
-        assert!(service.list().iter().find(|l| l.id == list.id).unwrap().items.is_empty());
-    }
-
-    #[test]
-    fn todo_missing_ids_error() {
-        let service = MockTodoService::seeded();
-        assert!(matches!(
-            service.create_item("nope", "x".into()),
-            Err(AppError::NotFound(_))
-        ));
-        assert!(matches!(
-            service.soft_delete_item("nope"),
-            Err(AppError::NotFound(_))
-        ));
+fn validate_title(title: &str) -> AppResult<()> {
+    if title.trim().is_empty() {
+        Err(AppError::InvalidInput("title must not be empty".into()))
+    } else {
+        Ok(())
     }
 }

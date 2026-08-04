@@ -1,18 +1,2 @@
-import type { TodoItem, TodoList } from "../types/todo";
-import { call } from "./index";
-
-export const list = () => call<TodoList[]>("todo_list");
-
-export const createList = (title: string) =>
-  call<TodoList>("todo_create_list", { title });
-
-export const createItem = (listId: string, title: string) =>
-  call<TodoItem>("todo_create_item", { listId, title });
-
-export const updateItem = (
-  id: string,
-  patch: { title?: string; completed?: boolean },
-) => call<TodoItem>("todo_update_item", { id, ...patch });
-
-export const softDelete = (id: string) =>
-  call<void>("todo_soft_delete", { id });
+import type{TodoItem,TodoList}from"../types/todo";import{call}from"./index";
+export const list=(includeDeleted=false)=>call<TodoList[]>("todo_list",{includeDeleted});export const createList=(title:string)=>call<TodoList>("todo_create_list",{title});export const updateList=(id:string,patch:{title?:string;deleted?:boolean})=>call<TodoList>("todo_update_list",{id,...patch});export const reorderLists=(ids:string[])=>call<TodoList[]>("todo_reorder_lists",{ids});export const createItem=(listId:string,title:string)=>call<TodoItem>("todo_create_item",{listId,title});export const updateItem=(id:string,patch:{title?:string;completed?:boolean;deleted?:boolean})=>call<TodoItem>("todo_update_item",{id,...patch});export const moveItem=(id:string,targetListId:string,index:number)=>call<TodoItem>("todo_move_item",{id,targetListId,index});export const reorderItems=(listId:string,ids:string[])=>call<TodoList>("todo_reorder_items",{listId,ids});export const softDelete=(id:string)=>call<void>("todo_soft_delete",{id});

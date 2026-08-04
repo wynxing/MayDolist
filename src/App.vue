@@ -1,7 +1,1 @@
-<script setup lang="ts">
-import MainBoard from "./views/MainBoard.vue";
-</script>
-
-<template>
-  <MainBoard />
-</template>
+<script setup lang="ts">import MainBoard from"./views/MainBoard.vue";import FloatingNote from"./views/FloatingNote.vue";const floating=new URLSearchParams(location.search).has("note");</script><template><FloatingNote v-if="floating"/><MainBoard v-else/></template>

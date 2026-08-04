@@ -1,14 +1,1 @@
-import type { GhAuthStatus, RepoSnapshot, RepoWatch } from "../types/github";
-import { call } from "./index";
-
-export const authStatus = () => call<GhAuthStatus>("github_auth_status");
-
-export const watchlist = () => call<RepoWatch[]>("github_watchlist");
-
-export const addWatch = (fullName: string) =>
-  call<RepoWatch[]>("github_watch_add", { fullName });
-
-export const removeWatch = (fullName: string) =>
-  call<RepoWatch[]>("github_watch_remove", { fullName });
-
-export const refresh = () => call<RepoSnapshot[]>("github_refresh");
+import type{GhAuthStatus,RepoSnapshot,RepoWatch}from"../types/github";import{call}from"./index";export const status=()=>call<GhAuthStatus>("github_status");export const watchlist=()=>call<RepoWatch[]>("github_watchlist");export const addWatch=(fullName:string)=>call<RepoWatch[]>("github_watch_add",{fullName});export const removeWatch=(fullName:string)=>call<RepoWatch[]>("github_watch_remove",{fullName});export const filters=(fullName:string,filters:string[])=>call<RepoWatch[]>("github_watch_filters",{fullName,filters});export const refreshRepo=(fullName:string)=>call<RepoSnapshot>("github_refresh_repo",{fullName});export const refreshAll=()=>call<RepoSnapshot[]>("github_refresh_all");export const snapshot=(fullName:string)=>call<RepoSnapshot|null>("github_get_snapshot",{fullName});export const open=(url:string)=>call<void>("open_external",{url});

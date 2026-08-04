@@ -1,9 +1,1 @@
-import type { AppConfig } from "../types/config";
-import { call } from "./index";
-
-export const getConfig = () => call<AppConfig>("get_config");
-
-export const getDataDir = () => call<string>("get_data_dir");
-
-export const setConfig = (config: AppConfig) =>
-  call<AppConfig>("set_config", { config });
+import type{AppConfig}from"../types/config";import{call}from"./index";export const get=()=>call<AppConfig>("settings_get");export const update=(config:AppConfig)=>call<AppConfig>("settings_update",{config});export const migrate=(target:string)=>call<string>("settings_migrate_data_dir",{target});export const autostart=(enabled:boolean)=>call<boolean>("settings_set_autostart",{enabled});

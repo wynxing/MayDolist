@@ -1,147 +1,306 @@
-use std::sync::Mutex;
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
 use crate::models::{GhAuthStatus, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
+use crate::storage::Storage;
 
-pub trait GithubService: Send + Sync {
-    fn auth_status(&self) -> GhAuthStatus;
-    fn watchlist(&self) -> Vec<RepoWatch>;
-    fn add_watch(&self, full_name: String) -> AppResult<Vec<RepoWatch>>;
-    fn remove_watch(&self, full_name: String) -> AppResult<Vec<RepoWatch>>;
-    fn refresh(&self) -> Vec<RepoSnapshot>;
+const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
+
+pub struct GithubService {
+    storage: Arc<Storage>,
+    refreshing: Mutex<HashSet<String>>,
 }
-
-/// In-memory mock: no real `gh` subprocess calls in the skeleton phase.
-pub struct MockGithubService {
-    watchlist: Mutex<Vec<RepoWatch>>,
-}
-
-impl MockGithubService {
-    pub fn seeded() -> Self {
+impl GithubService {
+    pub fn new(storage: Arc<Storage>) -> Self {
         Self {
-            watchlist: Mutex::new(vec![
-                RepoWatch { full_name: "tauri-apps/tauri".into() },
-                RepoWatch { full_name: "vuejs/core".into() },
-            ]),
+            storage,
+            refreshing: Mutex::new(HashSet::new()),
         }
     }
 
-    fn snapshot_for(&self, repo: &str) -> RepoSnapshot {
-        let fetched_at = now_rfc3339();
-        match repo {
-            "tauri-apps/tauri" => RepoSnapshot {
-                repo: repo.into(),
-                fetched_at,
-                issues: vec![
-                    GhIssue {
-                        number: 13001,
-                        title: "Improve window effects on Windows 10".into(),
-                        state: "open".into(),
-                        url: format!("https://github.com/{repo}/issues/13001"),
-                        updated_at: "2026-08-03T08:00:00Z".into(),
-                    },
-                    GhIssue {
-                        number: 12988,
-                        title: "Document CSP defaults".into(),
-                        state: "closed".into(),
-                        url: format!("https://github.com/{repo}/issues/12988"),
-                        updated_at: "2026-08-02T15:30:00Z".into(),
-                    },
-                ],
-                pull_requests: vec![GhPullRequest {
-                    number: 13010,
-                    title: "feat: add draft PR badge".into(),
-                    state: "open".into(),
-                    draft: true,
-                    url: format!("https://github.com/{repo}/pull/13010"),
-                    updated_at: "2026-08-04T02:00:00Z".into(),
-                }],
+    pub fn status(&self) -> GhAuthStatus {
+        let version = run_gh(&["--version"])
+            .ok()
+            .and_then(|v| v.lines().next().map(str::to_string));
+        if version.is_none() {
+            return GhAuthStatus {
+                state: "missing".into(),
+                logged_in: false,
+                user: None,
+                version: None,
+                message: "未安装 GitHub CLI".into(),
+            };
+        }
+        if run_gh(&["auth", "status"]).is_err() {
+            return GhAuthStatus {
+                state: "unauthenticated".into(),
+                logged_in: false,
+                user: None,
+                version,
+                message: "请运行 gh auth login".into(),
+            };
+        }
+        match run_gh(&["api", "user", "--jq", ".login"]) {
+            Ok(user) => GhAuthStatus {
+                state: "authenticated".into(),
+                logged_in: true,
+                user: Some(user.trim().into()),
+                version,
+                message: "GitHub CLI 已就绪".into(),
             },
-            "vuejs/core" => RepoSnapshot {
-                repo: repo.into(),
-                fetched_at,
-                issues: vec![GhIssue {
-                    number: 12500,
-                    title: "RFC: compiler inline mode".into(),
-                    state: "open".into(),
-                    url: format!("https://github.com/{repo}/issues/12500"),
-                    updated_at: "2026-08-01T12:00:00Z".into(),
-                }],
-                pull_requests: vec![],
-            },
-            _ => RepoSnapshot {
-                repo: repo.into(),
-                fetched_at,
-                issues: vec![],
-                pull_requests: vec![],
+            Err(err) => GhAuthStatus {
+                state: "offline".into(),
+                logged_in: true,
+                user: None,
+                version,
+                message: err.to_string(),
             },
         }
+    }
+
+    pub fn watchlist(&self) -> AppResult<Vec<RepoWatch>> {
+        let path = self.storage.data_dir().join("github/watchlist.json");
+        Ok(self.storage.read_json(&path)?.unwrap_or_default())
+    }
+    fn save_watchlist(&self, list: &[RepoWatch]) -> AppResult<()> {
+        self.storage
+            .write_json(&self.storage.data_dir().join("github/watchlist.json"), list)
+    }
+    pub fn add_watch(&self, name: String) -> AppResult<Vec<RepoWatch>> {
+        let full_name = normalize_repo(&name)?;
+        run_gh(&["api", &format!("repos/{full_name}"), "--jq", ".full_name"])?;
+        let mut list = self.watchlist()?;
+        if !list
+            .iter()
+            .any(|v| v.full_name.eq_ignore_ascii_case(&full_name))
+        {
+            list.push(RepoWatch {
+                full_name,
+                filters: FILTERS.iter().map(|v| v.to_string()).collect(),
+            });
+            self.save_watchlist(&list)?;
+        }
+        Ok(list)
+    }
+    pub fn remove_watch(&self, name: &str) -> AppResult<Vec<RepoWatch>> {
+        let mut list = self.watchlist()?;
+        list.retain(|v| !v.full_name.eq_ignore_ascii_case(name));
+        self.save_watchlist(&list)?;
+        Ok(list)
+    }
+    pub fn set_filters(&self, name: &str, filters: Vec<String>) -> AppResult<Vec<RepoWatch>> {
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == name)
+            .ok_or_else(|| AppError::NotFound(name.into()))?;
+        item.filters = filters
+            .into_iter()
+            .filter(|v| FILTERS.contains(&v.as_str()))
+            .collect();
+        self.save_watchlist(&list)?;
+        Ok(list)
+    }
+    pub fn snapshot(&self, repo: &str) -> AppResult<Option<RepoSnapshot>> {
+        self.storage.read_json(&cache_path(&self.storage, repo))
+    }
+
+    pub fn refresh(&self, repo: &str) -> AppResult<RepoSnapshot> {
+        normalize_repo(repo)?;
+        {
+            let mut lock = self
+                .refreshing
+                .lock()
+                .map_err(|_| AppError::Internal("refresh lock poisoned".into()))?;
+            if !lock.insert(repo.into()) {
+                return self
+                    .snapshot(repo)?
+                    .ok_or_else(|| AppError::Github("refresh already running".into()));
+            }
+        }
+        let result = self.refresh_inner(repo);
+        self.refreshing.lock().ok().map(|mut v| v.remove(repo));
+        match result {
+            Ok(snapshot) => Ok(snapshot),
+            Err(err) => {
+                if let Some(mut cached) = self.snapshot(repo)? {
+                    cached.last_error = Some(err.to_string());
+                    self.storage
+                        .write_json(&cache_path(&self.storage, repo), &cached)?;
+                    Ok(cached)
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+    pub fn refresh_all(&self) -> AppResult<Vec<RepoSnapshot>> {
+        let mut out = vec![];
+        for watch in self.watchlist()? {
+            if let Ok(snapshot) = self.refresh(&watch.full_name) {
+                out.push(snapshot);
+            }
+        }
+        Ok(out)
+    }
+
+    fn refresh_inner(&self, repo: &str) -> AppResult<RepoSnapshot> {
+        let user = self
+            .status()
+            .user
+            .ok_or_else(|| AppError::Github("GitHub CLI 未登录或离线".into()))?;
+        let watches = self.watchlist()?;
+        let filters = watches
+            .iter()
+            .find(|v| v.full_name == repo)
+            .map(|v| v.filters.clone())
+            .unwrap_or_else(|| FILTERS.iter().map(|v| v.to_string()).collect());
+        let mut issues: HashMap<(u64, String), GhIssue> = HashMap::new();
+        let mut prs: HashMap<u64, GhPullRequest> = HashMap::new();
+        let all_prs: Vec<ApiItem> = gh_json(&[
+            "api",
+            "--paginate",
+            &format!("repos/{repo}/pulls?state=open&per_page=100"),
+        ])?;
+        for row in all_prs {
+            prs.insert(row.number, row.into_pr(vec!["open".into()]));
+        }
+        for filter in &filters {
+            let qualifier = match filter.as_str() {
+                "mine" => format!("author:{user}"),
+                "mentioned" => format!("mentions:{user}"),
+                "assigned" => format!("assignee:{user}"),
+                _ => format!("involves:{user}"),
+            };
+            let query = format!("repo:{repo} state:open {qualifier}");
+            let result: SearchResult = gh_json(&[
+                "api",
+                "--method",
+                "GET",
+                "search/issues",
+                "-f",
+                &format!("q={query}"),
+                "-f",
+                "per_page=100",
+            ])?;
+            for row in result.items {
+                if row.pull_request.is_some() {
+                    prs.entry(row.number)
+                        .and_modify(|v| {
+                            if !v.matches.contains(filter) {
+                                v.matches.push(filter.clone())
+                            }
+                        })
+                        .or_insert_with(|| row.into_pr(vec![filter.clone()]));
+                } else {
+                    issues
+                        .entry((row.number, row.html_url.clone()))
+                        .and_modify(|v| {
+                            if !v.matches.contains(filter) {
+                                v.matches.push(filter.clone())
+                            }
+                        })
+                        .or_insert_with(|| row.into_issue(vec![filter.clone()]));
+                }
+            }
+        }
+        let now = now_rfc3339();
+        let snapshot = RepoSnapshot {
+            schema_version: 1,
+            repo: repo.into(),
+            fetched_at: now.clone(),
+            last_success_at: Some(now),
+            last_error: None,
+            issues: issues.into_values().collect(),
+            pull_requests: prs.into_values().collect(),
+        };
+        self.storage
+            .write_json(&cache_path(&self.storage, repo), &snapshot)?;
+        Ok(snapshot)
     }
 }
 
-impl GithubService for MockGithubService {
-    fn auth_status(&self) -> GhAuthStatus {
-        GhAuthStatus {
-            logged_in: true,
-            user: Some("wynn".into()),
-            message: "mock: gh auth status (真实调用在 v0.2 接入)".into(),
+#[derive(Deserialize, Clone)]
+struct SearchResult {
+    items: Vec<ApiItem>,
+}
+#[derive(Deserialize, Clone)]
+struct ApiItem {
+    number: u64,
+    title: String,
+    state: String,
+    html_url: String,
+    updated_at: String,
+    #[serde(default)]
+    draft: bool,
+    pull_request: Option<serde_json::Value>,
+}
+impl ApiItem {
+    fn into_pr(self, matches: Vec<String>) -> GhPullRequest {
+        GhPullRequest {
+            number: self.number,
+            title: self.title,
+            state: self.state,
+            draft: self.draft,
+            url: self.html_url,
+            updated_at: self.updated_at,
+            matches,
         }
     }
-
-    fn watchlist(&self) -> Vec<RepoWatch> {
-        self.watchlist.lock().unwrap().clone()
-    }
-
-    fn add_watch(&self, full_name: String) -> AppResult<Vec<RepoWatch>> {
-        let full_name = full_name.trim().to_string();
-        if !full_name.contains('/') {
-            return Err(AppError::InvalidInput(
-                "仓库格式应为 owner/repo".into(),
-            ));
+    fn into_issue(self, matches: Vec<String>) -> GhIssue {
+        GhIssue {
+            number: self.number,
+            title: self.title,
+            state: self.state,
+            url: self.html_url,
+            updated_at: self.updated_at,
+            kind: "issue".into(),
+            matches,
         }
-        let mut watchlist = self.watchlist.lock().unwrap();
-        if !watchlist.iter().any(|watch| watch.full_name == full_name) {
-            watchlist.push(RepoWatch { full_name });
-        }
-        Ok(watchlist.clone())
-    }
-
-    fn remove_watch(&self, full_name: String) -> AppResult<Vec<RepoWatch>> {
-        let mut watchlist = self.watchlist.lock().unwrap();
-        watchlist.retain(|watch| watch.full_name != full_name);
-        Ok(watchlist.clone())
-    }
-
-    fn refresh(&self) -> Vec<RepoSnapshot> {
-        let watchlist = self.watchlist.lock().unwrap().clone();
-        watchlist.iter().map(|watch| self.snapshot_for(&watch.full_name)).collect()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn github_mock_flow() {
-        let service = MockGithubService::seeded();
-        assert!(service.auth_status().logged_in);
-        assert_eq!(service.watchlist().len(), 2);
-
-        assert!(matches!(
-            service.add_watch("no-slash".into()),
-            Err(AppError::InvalidInput(_))
+fn gh_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> AppResult<T> {
+    serde_json::from_str(&run_gh(args)?)
+        .map_err(|e| AppError::Github(format!("invalid gh response: {e}")))
+}
+fn run_gh(args: &[&str]) -> AppResult<String> {
+    let output = Command::new("gh")
+        .args(args)
+        .output()
+        .map_err(|e| AppError::Github(e.to_string()))?;
+    if !output.status.success() {
+        return Err(AppError::Github(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
-        let watchlist = service.add_watch("microsoft/vscode".into()).unwrap();
-        assert_eq!(watchlist.len(), 3);
-
-        let snapshots = service.refresh();
-        assert_eq!(snapshots.len(), 3);
-        assert!(snapshots.iter().all(|s| !s.fetched_at.is_empty()));
-        assert!(!snapshots[0].issues.is_empty());
-
-        let watchlist = service.remove_watch("microsoft/vscode".into()).unwrap();
-        assert_eq!(watchlist.len(), 2);
     }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+fn normalize_repo(value: &str) -> AppResult<String> {
+    let value = value.trim().trim_matches('/');
+    let mut p = value.split('/');
+    let (Some(owner), Some(repo), None) = (p.next(), p.next(), p.next()) else {
+        return Err(AppError::InvalidInput(
+            "repository must be owner/repo".into(),
+        ));
+    };
+    if owner.is_empty()
+        || repo.is_empty()
+        || !owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        || !repo
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(AppError::InvalidInput("invalid repository name".into()));
+    }
+    Ok(format!("{owner}/{repo}"))
+}
+fn cache_path(storage: &Storage, repo: &str) -> std::path::PathBuf {
+    storage
+        .data_dir()
+        .join("github/cache")
+        .join(format!("{}.json", repo.replace('/', "_")))
 }

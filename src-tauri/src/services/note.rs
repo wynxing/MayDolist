@@ -1,109 +1,124 @@
-use std::sync::Mutex;
-
-use uuid::Uuid;
-
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
-use crate::models::Note;
+use crate::models::{Note, WindowBounds};
+use crate::storage::Storage;
+use std::sync::Arc;
+use uuid::Uuid;
 
-pub trait NoteService: Send + Sync {
-    fn list(&self) -> Vec<Note>;
-    fn create(&self, title: String, content: String) -> AppResult<Note>;
-    fn update(&self, id: &str, title: Option<String>, content: Option<String>)
-        -> AppResult<Note>;
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotePatch {
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub color: Option<String>,
+    pub pinned: Option<bool>,
+    pub floating: Option<bool>,
+    pub collapsed: Option<bool>,
+    pub always_on_top: Option<bool>,
+    pub window_bounds: Option<WindowBounds>,
+    pub deleted: Option<bool>,
 }
 
-pub struct MockNoteService {
-    notes: Mutex<Vec<Note>>,
+pub struct NoteService {
+    storage: Arc<Storage>,
 }
-
-impl MockNoteService {
-    pub fn seeded() -> Self {
-        Self {
-            notes: Mutex::new(vec![
-                Note {
-                    id: "note-1".into(),
-                    title: "窗口材质备忘".into(),
-                    content: "Tauri 2 原生支持 windowEffects: acrylic，无需手写 DWM。".into(),
-                    created_at: "2026-08-04T10:00:00Z".into(),
-                    updated_at: "2026-08-04T10:00:00Z".into(),
-                },
-                Note {
-                    id: "note-2".into(),
-                    title: "快捷键记录".into(),
-                    content: "默认全局快捷键 Ctrl+Alt+M 呼出主面板。".into(),
-                    created_at: "2026-08-04T11:00:00Z".into(),
-                    updated_at: "2026-08-04T11:00:00Z".into(),
-                },
-            ]),
+impl NoteService {
+    pub fn new(storage: Arc<Storage>) -> Self {
+        Self { storage }
+    }
+    pub fn list(&self, include_deleted: bool) -> AppResult<Vec<Note>> {
+        let mut notes: Vec<Note> = self.storage.list_json("notes")?;
+        if !include_deleted {
+            notes.retain(|v| !v.deleted);
         }
+        notes.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+        });
+        Ok(notes)
     }
-}
-
-impl NoteService for MockNoteService {
-    fn list(&self) -> Vec<Note> {
-        self.notes.lock().unwrap().clone()
+    pub fn get(&self, id: &str) -> AppResult<Note> {
+        self.list(true)?
+            .into_iter()
+            .find(|v| v.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("note {id}")))
     }
-
-    fn create(&self, title: String, content: String) -> AppResult<Note> {
+    pub fn create(&self, title: String, content: String) -> AppResult<Note> {
         if title.trim().is_empty() {
             return Err(AppError::InvalidInput("title must not be empty".into()));
         }
         let now = now_rfc3339();
         let note = Note {
+            schema_version: 1,
             id: Uuid::new_v4().to_string(),
-            title,
+            title: title.trim().into(),
             content,
+            tags: vec![],
+            color: "blue".into(),
+            pinned: false,
+            floating: false,
+            collapsed: false,
+            always_on_top: true,
+            window_bounds: None,
+            deleted: false,
             created_at: now.clone(),
             updated_at: now,
         };
-        self.notes.lock().unwrap().push(note.clone());
+        self.save(&note)?;
         Ok(note)
     }
-
-    fn update(
-        &self,
-        id: &str,
-        title: Option<String>,
-        content: Option<String>,
-    ) -> AppResult<Note> {
-        let mut notes = self.notes.lock().unwrap();
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == id)
-            .ok_or_else(|| AppError::NotFound(format!("note {id}")))?;
-        if let Some(title) = title {
-            if title.trim().is_empty() {
+    pub fn update(&self, id: &str, patch: NotePatch) -> AppResult<Note> {
+        let mut note = self.get(id)?;
+        if let Some(v) = patch.title {
+            if v.trim().is_empty() {
                 return Err(AppError::InvalidInput("title must not be empty".into()));
             }
-            note.title = title;
+            note.title = v.trim().into();
         }
-        if let Some(content) = content {
-            note.content = content;
+        if let Some(v) = patch.content {
+            note.content = v;
+        }
+        if let Some(v) = patch.tags {
+            let mut tags: Vec<String> = v
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+            tags.sort();
+            tags.dedup();
+            note.tags = tags;
+        }
+        if let Some(v) = patch.color {
+            note.color = v;
+        }
+        if let Some(v) = patch.pinned {
+            note.pinned = v;
+        }
+        if let Some(v) = patch.floating {
+            note.floating = v;
+        }
+        if let Some(v) = patch.collapsed {
+            note.collapsed = v;
+        }
+        if let Some(v) = patch.always_on_top {
+            note.always_on_top = v;
+        }
+        if let Some(v) = patch.window_bounds {
+            note.window_bounds = Some(v);
+        }
+        if let Some(v) = patch.deleted {
+            note.deleted = v;
         }
         note.updated_at = now_rfc3339();
-        Ok(note.clone())
+        self.save(&note)?;
+        Ok(note)
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn note_create_update() {
-        let service = MockNoteService::seeded();
-        let note = service.create("标题".into(), "内容".into()).unwrap();
-        assert_eq!(service.list().len(), 3);
-
-        let updated = service.update(&note.id, Some("新标题".into()), None).unwrap();
-        assert_eq!(updated.title, "新标题");
-        assert_eq!(updated.content, "内容");
-        assert!(updated.updated_at >= note.updated_at);
-
-        assert!(matches!(
-            service.update("nope", None, None),
-            Err(AppError::NotFound(_))
-        ));
+    pub fn permanent_delete(&self, id: &str) -> AppResult<()> {
+        self.storage.delete_entity("notes", id)
+    }
+    fn save(&self, note: &Note) -> AppResult<()> {
+        self.storage.save_entity("notes", &note.id, note)
     }
 }

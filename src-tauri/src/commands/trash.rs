@@ -1,0 +1,79 @@
+use crate::{
+    error::{AppError, AppResult},
+    events::emit_entity_changed,
+    models::{Note, TodoItem, TodoList},
+    services::note::NotePatch,
+    AppState,
+};
+use serde::Serialize;
+use tauri::{AppHandle, State};
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trash {
+    todo_lists: Vec<TodoList>,
+    todo_items: Vec<TodoItem>,
+    notes: Vec<Note>,
+}
+#[tauri::command]
+pub fn trash_list(state: State<'_, AppState>) -> AppResult<Trash> {
+    let lists = state.services.todo.list(true)?;
+    Ok(Trash {
+        todo_lists: lists.iter().filter(|v| v.deleted).cloned().collect(),
+        todo_items: lists
+            .into_iter()
+            .flat_map(|v| v.items)
+            .filter(|v| v.deleted)
+            .collect(),
+        notes: state
+            .services
+            .note
+            .list(true)?
+            .into_iter()
+            .filter(|v| v.deleted)
+            .collect(),
+    })
+}
+#[tauri::command]
+pub fn trash_restore(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    kind: String,
+    id: String,
+) -> AppResult<()> {
+    match kind.as_str() {
+        "todoList" => {
+            state.services.todo.update_list(&id, None, Some(false))?;
+        }
+        "todoItem" => {
+            state
+                .services
+                .todo
+                .update_item(&id, None, None, Some(false))?;
+        }
+        "note" => {
+            state.services.note.update(
+                &id,
+                NotePatch {
+                    deleted: Some(false),
+                    ..Default::default()
+                },
+            )?;
+        }
+        _ => return Err(AppError::InvalidInput("invalid trash kind".into())),
+    };
+    emit_entity_changed(&app, &kind, &id, "restored")
+}
+#[tauri::command]
+pub fn trash_delete_permanently(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    kind: String,
+    id: String,
+) -> AppResult<()> {
+    match kind.as_str() {
+        "todoList" | "todoItem" => state.services.todo.permanent_delete(&kind, &id)?,
+        "note" => state.services.note.permanent_delete(&id)?,
+        _ => return Err(AppError::InvalidInput("invalid trash kind".into())),
+    };
+    emit_entity_changed(&app, &kind, &id, "purged")
+}

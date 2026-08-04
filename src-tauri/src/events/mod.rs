@@ -1,28 +1,33 @@
+use crate::error::{AppError, AppResult};
+use chrono::Utc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-
-use crate::error::{AppError, AppResult};
-
-pub const EVENT_DATA_CHANGED: &str = "data-changed";
-
-#[derive(Debug, Clone, Serialize)]
+pub const ENTITY_CHANGED: &str = "entity-changed";
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DataChangedPayload {
+pub struct EntityChangedPayload {
     pub domain: String,
+    pub entity_id: String,
+    pub operation: String,
     pub timestamp: String,
 }
-
 pub fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    Utc::now().to_rfc3339()
 }
-
-/// Broadcast a data change to every open window after a successful write.
-pub fn emit_data_changed(app: &AppHandle, domain: &str) -> AppResult<()> {
-    let payload = DataChangedPayload {
-        domain: domain.to_string(),
-        timestamp: now_rfc3339(),
-    };
-    app.emit(EVENT_DATA_CHANGED, payload)
-        .map_err(|e| AppError::Internal(format!("failed to emit event: {e}")))?;
-    Ok(())
+pub fn emit_entity_changed(
+    app: &AppHandle,
+    domain: &str,
+    id: &str,
+    operation: &str,
+) -> AppResult<()> {
+    app.emit(
+        ENTITY_CHANGED,
+        EntityChangedPayload {
+            domain: domain.into(),
+            entity_id: id.into(),
+            operation: operation.into(),
+            timestamp: now_rfc3339(),
+        },
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))
 }

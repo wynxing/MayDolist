@@ -1,9 +1,1 @@
-/** Mirrors Rust `models::config::AppConfig` (keep in sync). */
-export interface AppConfig {
-  schemaVersion: number;
-  dataDir: string | null;
-  hotCorner: string;
-  hotkey: string;
-  theme: string;
-  githubRefreshIntervalMinutes: number;
-}
+export interface AppConfig{schemaVersion:number;dataDir:string;hotCorner:"off"|"top-left"|"top-right"|"bottom-left"|"bottom-right";hotkey:string;theme:"system"|"dark"|"light";githubRefreshIntervalMinutes:number;autostart:boolean;firstRun:boolean}
