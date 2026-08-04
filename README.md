@@ -78,6 +78,20 @@ pnpm tauri build      # 构建便携 exe
 - **v0.3**：独立悬浮便签窗 + 标签速记
 - **v1.0**：设置 UI、开机自启、NSIS 安装包
 
+## 架构决策记录（ADR）
+
+### ADR-001：UI 技术栈选型（进行中）
+
+2026-08-04 在 `prototypes/` 下构建了三个最小毛玻璃原型（已 gitignore，不入库），统一呈现「Win11 Acrylic 磨砂玻璃 + 半透明圆角深色卡片」，用于肉眼对比质感与开发手感：
+
+| 原型 | 技术栈 | Windows 磨砂方案 | 产物 |
+| --- | --- | --- | --- |
+| tauri-vue | Tauri 2 + Vue 3 + TS | 原生 `windowEffects: acrylic`，无需手写 DWM | `prototypes/tauri-vue/src-tauri/target/debug/prototypestauri-vue.exe` |
+| slint-app | Slint 1.17 + Rust | 取 HWND 后 `DwmSetWindowAttribute`（SYSTEMBACKDROP=3） | `prototypes/slint-app/target/debug/slint-app.exe` |
+| iced-app | Iced 0.14 + Rust | 后台线程按标题找 HWND 后开 Acrylic（iced 自带 blur 仅 macOS/Linux 生效） | `prototypes/iced-app/target/debug/iced-app.exe` |
+
+结论：待定。由三个窗口的肉眼对比结果决定正式项目技术栈；Tauri 仍为默认基线（原生支持 Acrylic、生态成熟、后续多窗口与 WebView2 调试成本低）。
+
 ## License
 
 [MIT](LICENSE)

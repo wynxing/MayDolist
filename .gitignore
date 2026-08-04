@@ -32,3 +32,6 @@ src-tauri/target
 # Environment
 .env
 .env.*
+
+# Prototypes (试水产物，不入库)
+prototypes/
