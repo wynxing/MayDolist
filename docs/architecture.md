@@ -32,9 +32,10 @@ MayDolist 是一款面向 Windows 的「收纳式」桌面便签应用，平时�
 
 ### 2.1 当前状态
 
-- 仓库目前仅有 `README.md`、`LICENSE`、`.gitignore` 与 ADR-001（UI 技术栈选型，已定稿）。
+- 正式实现骨架已落地：仓库根目录为 Tauri 2 + Vue 3 + TS 项目（`src/` 前端与 `src-tauri/` 后端）。
+- 骨架采用“真实接口 + Mock 业务”：`config` / `storage` / `events` 为真实实现，`todo` / `note` / `snippet` / `github` 为内存 Mock（重启不保留）；托盘、热键、真实 gh 调用留待对应里程碑。
 - `prototypes/` 下有三个最小毛玻璃原型（Tauri + Vue、Slint、Iced），仅用于肉眼对比质感与开发手感，已 gitignore，不入库。
-- 尚未有正式实现代码；本文档为正式实现提供设计基线。
+- 本文档为正式实现提供设计基线，骨架实现与之保持模块边界一致。
 
 ### 2.2 系统边界
 

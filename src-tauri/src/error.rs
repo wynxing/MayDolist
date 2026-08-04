@@ -1,0 +1,33 @@
+use serde::{Serialize, Serializer};
+
+/// Unified application error, serialized as a plain message string so the
+/// frontend can surface it directly.
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("storage error: {0}")]
+    Storage(String),
+    #[error("corrupt JSON at {path}")]
+    CorruptFile { path: String },
+    #[error("not found: {0}")]
+    NotFound(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    #[error("github error: {0}")]
+    Github(String),
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+pub type AppResult<T> = Result<T, AppError>;
+
+impl Serialize for AppError {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(value: std::io::Error) -> Self {
+        AppError::Storage(value.to_string())
+    }
+}

@@ -71,6 +71,26 @@ pnpm tauri build      # 构建便携 exe
 
 构建产物为单文件便携 exe（前端资源内嵌，依赖系统 WebView2），免安装直接运行。
 
+## 项目结构（当前骨架）
+
+正式应用代码位于仓库根目录，按 [docs/architecture.md](docs/architecture.md) 的模块边界组织：
+
+```text
+src/                  # Vue 3 + TS 前端
+  api/                # invoke 唯一入口与错误归一化
+  stores/             # Pinia 状态（settings / todo / note / snippet / github）
+  views/              # 主面板与四个功能视图
+  types/              # 与 Rust models 对应的 TS 类型
+src-tauri/src/        # Rust 后端
+  commands/           # Tauri 命令（真实接口）
+  services/           # 领域服务 trait + Mock 实现（骨架期内存数据）
+  models/             # serde 数据模型
+  storage/            # 数据目录解析 + 原子写 + config 读写（真实）
+  events/             # 事件广播（data-changed）
+```
+
+骨架期：config 与存储基建真实落盘；todo / note / snippet / github 为真实命令接口 + 内存 Mock（重启不保留）。托盘、热键、真实 gh 调用按 roadmap 后续接入。
+
 ## Roadmap
 
 - **v0.1**：Todo 待办 + 收纳式呼出（热角 / 快捷键 / 托盘）
