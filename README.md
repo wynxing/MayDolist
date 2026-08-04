@@ -80,7 +80,7 @@ pnpm tauri build      # 构建便携 exe
 
 ## 架构决策记录（ADR）
 
-### ADR-001：UI 技术栈选型（进行中）
+### ADR-001：UI 技术栈选型（已定稿）
 
 2026-08-04 在 `prototypes/` 下构建了三个最小毛玻璃原型（已 gitignore，不入库），统一呈现「Win11 Acrylic 磨砂玻璃 + 半透明圆角深色卡片」，用于肉眼对比质感与开发手感：
 
@@ -90,7 +90,16 @@ pnpm tauri build      # 构建便携 exe
 | slint-app | Slint 1.17 + Rust | 取 HWND 后 `DwmSetWindowAttribute`（SYSTEMBACKDROP=3） | `prototypes/slint-app/target/debug/slint-app.exe` |
 | iced-app | Iced 0.14 + Rust | 后台线程按标题找 HWND 后开 Acrylic（iced 自带 blur 仅 macOS/Linux 生效） | `prototypes/iced-app/target/debug/iced-app.exe` |
 
-结论：待定。由三个窗口的肉眼对比结果决定正式项目技术栈；Tauri 仍为默认基线（原生支持 Acrylic、生态成熟、后续多窗口与 WebView2 调试成本低）。
+**结论：采用 Tauri 2 + Vue 3 + TypeScript + Rust 后端 + gh CLI。**
+
+决策理由：
+
+- Tauri 原生支持 Windows Acrylic 磨砂效果（`windowEffects`），无需手写 DWM 调用。
+- Vue 3 + TS 负责全部界面，Rust 负责窗口、托盘、热键、原子写盘与 gh 调用，分工清晰。
+- 多窗口（主面板 + 悬浮便签）与 WebView2 调试成本低，生态成熟。
+- 拒绝 Slint / Iced：纯 Rust UI 在多窗口、动态列表与迭代速度上成本更高，毛玻璃需额外手写 DWM。
+
+整体架构见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 
