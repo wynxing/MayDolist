@@ -48,7 +48,7 @@ pub fn note_soft_delete(state: State<'_, AppState>, app: AppHandle, id: String) 
     emit_entity_changed(&app, "note", &id, "deleted")
 }
 #[tauri::command]
-pub fn note_show_floating(
+pub async fn note_show_floating(
     state: State<'_, AppState>,
     app: AppHandle,
     id: String,
@@ -60,12 +60,15 @@ pub fn note_show_floating(
             ..Default::default()
         },
     )?;
+    // On Windows, `WebviewWindowBuilder::build()` deadlocks when called from a
+    // synchronous command; Tauri runs async commands on a separate thread
+    // where window creation is safe (see wry#583).
     crate::app::show_note(&app, &v)?;
     emit_entity_changed(&app, "note", &id, "floating")?;
     Ok(v)
 }
 #[tauri::command]
-pub fn note_dock(state: State<'_, AppState>, app: AppHandle, id: String) -> AppResult<Note> {
+pub async fn note_dock(state: State<'_, AppState>, app: AppHandle, id: String) -> AppResult<Note> {
     if let Some(w) = app.get_webview_window(&format!("note-{id}")) {
         w.close().ok();
     }

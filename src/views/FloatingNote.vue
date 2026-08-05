@@ -6,12 +6,20 @@ import * as api from "../api/note";
 const id = new URLSearchParams(location.search).get("note")!;
 const note = ref<any>(null);
 const status = ref("");
+const loadError = ref("");
 let timer: number | undefined;
 let saveSeq = 0;
 
-onMounted(async () => {
-  note.value = await api.get(id);
-});
+async function load() {
+  loadError.value = "";
+  try {
+    note.value = await api.get(id);
+  } catch (err) {
+    loadError.value = String(err);
+  }
+}
+
+onMounted(load);
 
 watch(
   note,
@@ -56,13 +64,23 @@ async function toggle() {
 }
 </script>
 <template>
-  <div v-if="note" class="floating" :class="{ collapsed: note.collapsed }">
-    <header data-tauri-drag-region>
-      <input v-model="note.title" class="floating-title" />
-      <button @click="toggle">{{ note.collapsed ? "▾" : "▴" }}</button>
-      <button @click="dock">×</button>
+  <div v-if="loadError" class="floating">
+    <header>
+      <b class="floating-error">加载失败</b>
+      <button aria-label="重新加载便签" @click="load">重试</button>
+      <button aria-label="关闭悬浮便签" @click="dock">×</button>
     </header>
-    <textarea v-if="!note.collapsed" v-model="note.content" class="input"></textarea>
+    <small class="floating-error">{{ loadError }}</small>
+  </div>
+  <div v-else-if="note" class="floating" :class="{ collapsed: note.collapsed }">
+    <header data-tauri-drag-region>
+      <input v-model="note.title" class="floating-title" aria-label="便签标题" />
+      <button :aria-label="note.collapsed ? '展开便签' : '收起便签'" @click="toggle">
+        {{ note.collapsed ? "▾" : "▴" }}
+      </button>
+      <button aria-label="关闭悬浮便签" @click="dock">×</button>
+    </header>
+    <textarea v-if="!note.collapsed" v-model="note.content" class="input" aria-label="便签内容"></textarea>
     <small v-if="!note.collapsed">{{ status }}</small>
   </div>
 </template>

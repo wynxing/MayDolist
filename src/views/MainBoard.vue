@@ -56,7 +56,7 @@ onMounted(async () => {
           {{ t[1] }}
         </button>
       </nav>
-      <button class="close" @click="call('app_hide_main')">×</button>
+      <button class="close" aria-label="隐藏 MayDolist" title="隐藏" @click="call('app_hide_main')">×</button>
     </header>
     <main class="content">
       <KeepAlive>

@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::window::{Effect, EffectsBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 pub fn setup(app: &mut tauri::App) -> AppResult<()> {
@@ -27,21 +28,31 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
     }
     spawn_hot_corner(handle);
     if let Some(main) = app.get_webview_window("main") {
+        apply_acrylic(&main);
         let blur_window = main.clone();
         main.on_window_event(move |event| match event {
             tauri::WindowEvent::Focused(false) => {
                 // Delay the hide and only act when focus did not move to one
-                // of our own windows (floating note, etc.).
+                // of our own windows (floating note, etc.). The two-stage
+                // check covers the window where a new webview is still
+                // initializing: focus may briefly be nowhere during creation.
                 let handle = blur_window.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(300));
-                    let any_focused = handle
+                    let focus_is_elsewhere = !handle
                         .webview_windows()
                         .values()
                         .any(|w| w.is_focused().unwrap_or(false));
-                    if !any_focused {
-                        if let Some(window) = handle.get_webview_window("main") {
-                            window.hide().ok();
+                    if focus_is_elsewhere {
+                        std::thread::sleep(Duration::from_millis(300));
+                        let still_elsewhere = !handle
+                            .webview_windows()
+                            .values()
+                            .any(|w| w.is_focused().unwrap_or(false));
+                        if still_elsewhere {
+                            if let Some(window) = handle.get_webview_window("main") {
+                                window.hide().ok();
+                            }
                         }
                     }
                 });
@@ -127,6 +138,7 @@ pub fn show_main(app: &AppHandle) -> AppResult<()> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| AppError::NotFound("main window".into()))?;
+    apply_acrylic(&window);
     window.show().map_err(internal)?;
     window.set_focus().map_err(internal)
 }
@@ -143,6 +155,7 @@ pub fn toggle_main(app: &AppHandle) -> AppResult<()> {
     if w.is_visible().map_err(internal)? {
         w.hide().map_err(internal)
     } else {
+        apply_acrylic(&w);
         w.show().map_err(internal)?;
         w.set_focus().map_err(internal)
     }
@@ -151,6 +164,7 @@ pub fn toggle_main(app: &AppHandle) -> AppResult<()> {
 pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {
     let label = format!("note-{}", note.id);
     if let Some(w) = app.get_webview_window(&label) {
+        apply_acrylic(&w);
         w.show().map_err(internal)?;
         return w.set_focus().map_err(internal);
     }
@@ -171,11 +185,13 @@ pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {
         .always_on_top(note.always_on_top)
         .skip_taskbar(true)
         .transparent(true)
+        .effects(acrylic_effects())
         .resizable(true);
     if let Some(v) = &note.window_bounds {
         builder = builder.position(v.x, v.y);
     }
     let window = builder.build().map_err(internal)?;
+    apply_acrylic(&window);
     let note_id = note.id.clone();
     let initial_bounds = note.window_bounds.clone().unwrap_or(WindowBounds {
         x: 0.0,
@@ -238,6 +254,17 @@ pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {
         _ => {}
     });
     Ok(())
+}
+
+fn acrylic_effects() -> tauri::utils::config::WindowEffectsConfig {
+    EffectsBuilder::new().effect(Effect::Acrylic).build()
+}
+
+fn apply_acrylic(window: &WebviewWindow) {
+    // Reapply at runtime as well as through tauri.conf.json. This covers
+    // dynamically-created note windows and Windows sessions where the effect
+    // is cleared while a transparent window is hidden and shown again.
+    window.set_effects(acrylic_effects()).ok();
 }
 
 fn spawn_github_refresh(app: AppHandle) {
