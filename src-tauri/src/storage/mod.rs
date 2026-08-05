@@ -216,7 +216,6 @@ impl Storage {
         {
             let mut file = fs::File::create(&tmp_path)?;
             file.write_all(bytes)?;
-            file.sync_all()?;
         }
         replace_file(&tmp_path, path)?;
         Ok(())

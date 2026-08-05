@@ -2,6 +2,7 @@ mod app;
 mod commands;
 mod error;
 mod events;
+mod logging;
 mod models;
 mod services;
 mod storage;
@@ -17,6 +18,7 @@ use storage::Storage;
 pub struct AppState {
     pub storage: Arc<Storage>,
     pub services: Services,
+    pub log: logging::Logger,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,6 +30,7 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    let log = logging::Logger::new(storage.data_dir().join("logs"));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -43,21 +46,23 @@ pub fn run() {
         .setup(|tauri_app| {
             app::setup(tauri_app)?;
             let state = tauri_app.state::<AppState>();
-            eprintln!(
+            let message = format!(
                 "[MayDolist] setup ok, data dir: {}",
                 state.storage.data_dir().display()
             );
+            state.log.log("info", &message);
+            eprintln!("{message}");
             Ok(())
         })
         .manage(AppState {
             storage: storage.clone(),
             services: Services::new(storage),
+            log,
         })
         .invoke_handler(tauri::generate_handler![
             commands::config::get_config,
             commands::config::get_data_dir,
             commands::config::set_config,
-            app::app_get_bootstrap,
             app::app_show_main,
             app::app_hide_main,
             app::app_quit,

@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
@@ -13,16 +14,33 @@ const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
 pub struct GithubService {
     storage: Arc<Storage>,
     refreshing: Mutex<HashSet<String>>,
+    /// Cached auth status; only "authenticated" results are cached so that a
+    /// later `gh auth login` is still picked up on the next check.
+    auth_cache: Mutex<Option<GhAuthStatus>>,
 }
 impl GithubService {
     pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
             refreshing: Mutex::new(HashSet::new()),
+            auth_cache: Mutex::new(None),
         }
     }
 
     pub fn status(&self) -> GhAuthStatus {
+        if let Some(cached) = self.auth_cache.lock().ok().and_then(|v| v.clone()) {
+            return cached;
+        }
+        let status = self.status_inner();
+        if status.state == "authenticated" {
+            if let Ok(mut cache) = self.auth_cache.lock() {
+                *cache = Some(status.clone());
+            }
+        }
+        status
+    }
+
+    fn status_inner(&self) -> GhAuthStatus {
         let version = run_gh(&["--version"])
             .ok()
             .and_then(|v| v.lines().next().map(str::to_string));
@@ -139,12 +157,22 @@ impl GithubService {
         }
     }
     pub fn refresh_all(&self) -> AppResult<Vec<RepoSnapshot>> {
+        let watches = self.watchlist()?;
         let mut out = vec![];
-        for watch in self.watchlist()? {
-            if let Ok(snapshot) = self.refresh(&watch.full_name) {
-                out.push(snapshot);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = watches
+                .iter()
+                .map(|watch| {
+                    let repo = watch.full_name.clone();
+                    scope.spawn(move || self.refresh(&repo))
+                })
+                .collect();
+            for handle in handles {
+                if let Ok(Ok(snapshot)) = handle.join() {
+                    out.push(snapshot);
+                }
             }
-        }
+        });
         Ok(out)
     }
 
@@ -177,35 +205,49 @@ impl GithubService {
                 _ => format!("involves:{user}"),
             };
             let query = format!("repo:{repo} state:open {qualifier}");
-            let result: SearchResult = gh_json(&[
-                "api",
-                "--method",
-                "GET",
-                "search/issues",
-                "-f",
-                &format!("q={query}"),
-                "-f",
-                "per_page=100",
-            ])?;
-            for row in result.items {
-                if row.pull_request.is_some() {
-                    prs.entry(row.number)
-                        .and_modify(|v| {
-                            if !v.matches.contains(filter) {
-                                v.matches.push(filter.clone())
-                            }
-                        })
-                        .or_insert_with(|| row.into_pr(vec![filter.clone()]));
-                } else {
-                    issues
-                        .entry((row.number, row.html_url.clone()))
-                        .and_modify(|v| {
-                            if !v.matches.contains(filter) {
-                                v.matches.push(filter.clone())
-                            }
-                        })
-                        .or_insert_with(|| row.into_issue(vec![filter.clone()]));
+            // GitHub search caps at 100 results/page and 1000 total; page
+            // through manually because `gh api --paginate` cannot merge the
+            // `{items: [...]}` envelope that search/issues returns.
+            let mut page = 1u32;
+            loop {
+                let result: SearchResult = gh_json(&[
+                    "api",
+                    "--method",
+                    "GET",
+                    "search/issues",
+                    "-f",
+                    &format!("q={query}"),
+                    "-f",
+                    "per_page=100",
+                    "-f",
+                    &format!("page={page}"),
+                ])?;
+                let items = result.items;
+                let is_last_page = items.len() < 100 || page >= 10;
+                for row in items {
+                    if row.pull_request.is_some() {
+                        prs.entry(row.number)
+                            .and_modify(|v| {
+                                if !v.matches.contains(filter) {
+                                    v.matches.push(filter.clone())
+                                }
+                            })
+                            .or_insert_with(|| row.into_pr(vec![filter.clone()]));
+                    } else {
+                        issues
+                            .entry((row.number, row.html_url.clone()))
+                            .and_modify(|v| {
+                                if !v.matches.contains(filter) {
+                                    v.matches.push(filter.clone())
+                                }
+                            })
+                            .or_insert_with(|| row.into_issue(vec![filter.clone()]));
+                    }
                 }
+                if is_last_page {
+                    break;
+                }
+                page += 1;
             }
         }
         let now = now_rfc3339();
@@ -268,16 +310,59 @@ fn gh_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> AppResult<T> {
         .map_err(|e| AppError::Github(format!("invalid gh response: {e}")))
 }
 fn run_gh(args: &[&str]) -> AppResult<String> {
-    let output = Command::new("gh")
+    let mut command = Command::new("gh");
+    command
         .args(args)
-        .output()
-        .map_err(|e| AppError::Github(e.to_string()))?;
-    if !output.status.success() {
-        return Err(AppError::Github(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: keep the console hidden in release builds.
+        command.creation_flags(0x0800_0000);
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let mut child = command
+        .spawn()
+        .map_err(|e| AppError::Github(e.to_string()))?;
+    let mut stdout = child.stdout.take().expect("stdout must be piped");
+    let mut stderr = child.stderr.take().expect("stderr must be piped");
+    let out_thread = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = String::new();
+        let _ = stdout.read_to_string(&mut buf);
+        buf
+    });
+    let err_thread = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = String::new();
+        let _ = stderr.read_to_string(&mut buf);
+        buf
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(AppError::Github("gh timed out after 30s".into()));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => return Err(AppError::Github(err.to_string())),
+        }
+    };
+    let stdout = out_thread
+        .join()
+        .map_err(|_| AppError::Github("gh output thread panicked".into()))?;
+    let stderr = err_thread
+        .join()
+        .map_err(|_| AppError::Github("gh stderr thread panicked".into()))?;
+    if !status.success() {
+        return Err(AppError::Github(stderr.trim().to_string()));
+    }
+    Ok(stdout)
 }
 fn normalize_repo(value: &str) -> AppResult<String> {
     let value = value.trim().trim_matches('/');

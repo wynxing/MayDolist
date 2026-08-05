@@ -5,6 +5,8 @@
   "windows": ["main", "note-*"],
   "permissions": [
     "core:default",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
     "opener:default"
   ]
 }

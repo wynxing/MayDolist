@@ -33,7 +33,7 @@ MayDolist 是一款面向 Windows 的「收纳式」桌面便签应用，平时�
 ### 2.1 当前状态
 
 - 正式实现骨架已落地：仓库根目录为 Tauri 2 + Vue 3 + TS 项目（`src/` 前端与 `src-tauri/` 后端）。
-- 骨架采用“真实接口 + Mock 业务”：`config` / `storage` / `events` 为真实实现，`todo` / `note` / `snippet` / `github` 为内存 Mock（重启不保留）；托盘、热键、真实 gh 调用留待对应里程碑。
+- v1.0 已实现真实业务：`todo` / `note` / `github` 均为 JSON 原子持久化与真实 gh 调用；托盘、全局热键、多显示器热角、悬浮便签、数据迁移与开机自启均已落地。
 - `prototypes/` 下有三个最小毛玻璃原型（Tauri + Vue、Slint、Iced），仅用于肉眼对比质感与开发手感，已 gitignore，不入库。
 - 本文档为正式实现提供设计基线，骨架实现与之保持模块边界一致。
 
@@ -61,7 +61,7 @@ MayDolist 是一款面向 Windows 的「收纳式」桌面便签应用，平时�
 ```mermaid
 flowchart TB
     subgraph UI["Vue 3 + TS 前端层"]
-        Main["主面板（Todo / 便签 / GitHub / 速记）"]
+        Main["主面板（Todo / 便签 / GitHub / 设置）"]
         Note["悬浮便签窗（可多开）"]
     end
 
@@ -136,14 +136,14 @@ sequenceDiagram
 | `commands` | 暴露给前端的 Tauri Commands，做参数校验与错误转换 | 业务规则 |
 | `storage` | 数据目录解析、JSON 序列化 / 反序列化、原子写盘 | GitHub 数据获取 |
 | `github` | gh 子进程调用、响应解析、缓存读写、定时刷新 | UI 展示 |
-| `models` | serde 数据模型（config / note / todo / snippet / github） | 任何 IO |
+| `models` | serde 数据模型（config / note / todo / github） | 任何 IO |
 | `events` | 跨窗口事件广播（数据变更、窗口状态） | 业务逻辑 |
 
 ### 4.2 Vue 前端层
 
 | 模块 | 职责 |
 | --- | --- |
-| `views` | 主面板视图（Todo / 便签 / GitHub / 速记）与悬浮便签窗 |
+| `views` | 主面板视图（Todo / 便签 / GitHub / 设置）与悬浮便签窗 |
 | `stores` | Pinia 状态管理，维护 UI 状态与缓存数据 |
 | `api` | `invoke` 封装层，前端唯一的数据访问入口 |
 | `components` | 可复用 UI 组件（卡片、列表、标签、窗口控制等） |
@@ -162,7 +162,6 @@ MayDolist/
 ├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态
-├── snippets/<id>.json       # 速记：标签与内容
 └── github/
     ├── watchlist.json       # 追踪仓库列表
     └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt
@@ -220,7 +219,7 @@ MayDolist/
 
 - **单写者**：所有文件写入由 Rust 单进程串行化（Mutex），避免多窗口并发写冲突。
 - **先写盘后广播**：写盘成功后才广播数据变更事件，前端收到的状态与磁盘一致。
-- **缓存与实体分离**：GitHub 缓存（`github/cache/`）与用户实体数据（`notes/`、`todos/`、`snippets/`）分离，缓存可安全重建。
+- **缓存与实体分离**：GitHub 缓存（`github/cache/`）与用户实体数据（`notes/`、`todos/`）分离，缓存可安全重建。
 - **多窗口同步**：通过 Tauri 事件广播数据变更，所有窗口（主面板与悬浮便签）保持同一数据视图。
 
 ## 8. 安全与权限

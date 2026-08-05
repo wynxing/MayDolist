@@ -132,9 +132,11 @@ impl TodoService {
     pub fn move_item(&self, id: &str, target_list_id: &str, index: usize) -> AppResult<TodoItem> {
         let mut lists = self.list(true)?;
         let mut found = None;
+        let mut source_list_id = None;
         for list in &mut lists {
             if let Some(pos) = list.items.iter().position(|v| v.id == id) {
                 found = Some(list.items.remove(pos));
+                source_list_id = Some(list.id.clone());
                 break;
             }
         }
@@ -146,6 +148,11 @@ impl TodoService {
         let at = index.min(target.items.len());
         target.items.insert(at, item.clone());
         for list in &mut lists {
+            let changed =
+                list.id == target_list_id || source_list_id.as_deref() == Some(list.id.as_str());
+            if !changed {
+                continue;
+            }
             for (order, row) in list.items.iter_mut().enumerate() {
                 row.sort_order = order as i32;
             }

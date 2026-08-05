@@ -1,9 +1,11 @@
 use crate::{
     error::{AppError, AppResult},
-    models::Note,
+    models::{Note, WindowBounds},
     AppState,
 };
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -28,7 +30,21 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
         let blur_window = main.clone();
         main.on_window_event(move |event| match event {
             tauri::WindowEvent::Focused(false) => {
-                blur_window.hide().ok();
+                // Delay the hide and only act when focus did not move to one
+                // of our own windows (floating note, etc.).
+                let handle = blur_window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(300));
+                    let any_focused = handle
+                        .webview_windows()
+                        .values()
+                        .any(|w| w.is_focused().unwrap_or(false));
+                    if !any_focused {
+                        if let Some(window) = handle.get_webview_window("main") {
+                            window.hide().ok();
+                        }
+                    }
+                });
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
@@ -161,82 +177,102 @@ pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {
     }
     let window = builder.build().map_err(internal)?;
     let note_id = note.id.clone();
-    let handle = app.clone();
-    window.on_window_event(move |event| {
-        let patch = match event {
-            tauri::WindowEvent::Moved(position) => {
-                let current = handle.state::<AppState>().services.note.get(&note_id).ok();
-                current.map(|note| crate::services::note::NotePatch {
-                    window_bounds: Some(crate::models::WindowBounds {
-                        x: position.x as f64,
-                        y: position.y as f64,
-                        width: note
-                            .window_bounds
-                            .as_ref()
-                            .map(|v| v.width)
-                            .unwrap_or(360.0),
-                        height: note
-                            .window_bounds
-                            .as_ref()
-                            .map(|v| v.height)
-                            .unwrap_or(280.0),
-                    }),
-                    ..Default::default()
-                })
+    let initial_bounds = note.window_bounds.clone().unwrap_or(WindowBounds {
+        x: 0.0,
+        y: 0.0,
+        width: 360.0,
+        height: 280.0,
+    });
+    let tracker = Arc::new(Mutex::new(initial_bounds));
+    let (bounds_tx, bounds_rx) = std::sync::mpsc::channel::<WindowBounds>();
+    let writer = app.clone();
+    let writer_note_id = note_id.clone();
+    // Coalescing writer: a Moved/Resized event can fire every frame while the
+    // user drags/resizes; queue bounds here and persist at most one write per
+    // 250ms of activity, always flushing the final position/size.
+    std::thread::spawn(move || {
+        while let Ok(mut bounds) = bounds_rx.recv() {
+            while let Ok(newer) = bounds_rx.try_recv() {
+                bounds = newer;
             }
-            tauri::WindowEvent::Resized(size) => {
-                let current = handle.state::<AppState>().services.note.get(&note_id).ok();
-                current.map(|note| crate::services::note::NotePatch {
-                    window_bounds: Some(crate::models::WindowBounds {
-                        x: note.window_bounds.as_ref().map(|v| v.x).unwrap_or(0.0),
-                        y: note.window_bounds.as_ref().map(|v| v.y).unwrap_or(0.0),
-                        width: size.width as f64,
-                        height: size.height as f64,
-                    }),
-                    ..Default::default()
-                })
+            std::thread::sleep(Duration::from_millis(250));
+            while let Ok(newer) = bounds_rx.try_recv() {
+                bounds = newer;
             }
-            _ => None,
-        };
-        if let Some(patch) = patch {
-            handle
+            let patch = crate::services::note::NotePatch {
+                window_bounds: Some(bounds),
+                ..Default::default()
+            };
+            writer
                 .state::<AppState>()
                 .services
                 .note
-                .update(&note_id, patch)
+                .update(&writer_note_id, patch)
                 .ok();
         }
+    });
+    let event_tracker = tracker.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::Moved(position) => {
+            let mut bounds = event_tracker.lock().unwrap();
+            if (bounds.x - position.x as f64).abs() < 1.0
+                && (bounds.y - position.y as f64).abs() < 1.0
+            {
+                return;
+            }
+            bounds.x = position.x as f64;
+            bounds.y = position.y as f64;
+            let _ = bounds_tx.send(bounds.clone());
+        }
+        tauri::WindowEvent::Resized(size) => {
+            let mut bounds = event_tracker.lock().unwrap();
+            if (bounds.width - size.width as f64).abs() < 1.0
+                && (bounds.height - size.height as f64).abs() < 1.0
+            {
+                return;
+            }
+            bounds.width = size.width as f64;
+            bounds.height = size.height as f64;
+            let _ = bounds_tx.send(bounds.clone());
+        }
+        _ => {}
     });
     Ok(())
 }
 
 fn spawn_github_refresh(app: AppHandle) {
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(60));
+        std::thread::sleep(Duration::from_secs(60));
         let state = app.state::<AppState>();
         let config = match state.storage.load_config() {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(err) => {
+                state
+                    .log
+                    .log("error", &format!("failed to load config: {err}"));
+                continue;
+            }
         };
         if config.github_refresh_interval_minutes == 0 {
             continue;
         }
         let minute = chrono::Utc::now().timestamp() / 60;
-        if minute % i64::from(config.github_refresh_interval_minutes) == 0
-            && state.services.github.refresh_all().is_ok()
-        {
-            crate::events::emit_entity_changed(&app, "github", "*", "background-refreshed").ok();
+        if minute % i64::from(config.github_refresh_interval_minutes) == 0 {
+            match state.services.github.refresh_all() {
+                Ok(_) => {
+                    crate::events::emit_entity_changed(&app, "github", "*", "background-refreshed")
+                        .ok();
+                }
+                Err(err) => {
+                    state
+                        .log
+                        .log("error", &format!("background github refresh failed: {err}"));
+                }
+            }
         }
     });
 }
 
-#[tauri::command]
-pub fn app_get_bootstrap(state: tauri::State<'_, AppState>) -> AppResult<serde_json::Value> {
-    let config = state.storage.load_config()?;
-    Ok(
-        serde_json::json!({"config":config,"dataDir":state.storage.data_dir(),"version":env!("CARGO_PKG_VERSION"),"logDir":state.storage.data_dir().join("logs")}),
-    )
-}
 #[tauri::command]
 pub fn app_show_main(app: AppHandle) -> AppResult<()> {
     show_main(&app)
@@ -263,19 +299,28 @@ fn spawn_hot_corner(app: AppHandle) {
     std::thread::spawn(move || {
         let mut entered = None;
         let mut armed = true;
+        let mut config: Option<crate::models::AppConfig> = None;
+        let mut last_config_load = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(80));
-            let config = match app.state::<AppState>().storage.load_config() {
-                Ok(v) => v,
-                Err(_) => continue,
+            let now = std::time::Instant::now();
+            if now.duration_since(last_config_load) >= Duration::from_secs(1) {
+                last_config_load = now;
+                config = app.state::<AppState>().storage.load_config().ok();
+            }
+            let Some(cfg) = config.as_ref() else {
+                std::thread::sleep(Duration::from_millis(250));
+                continue;
             };
-            if config.hot_corner == "off" {
+            if cfg.hot_corner == "off" {
+                std::thread::sleep(Duration::from_secs(1));
                 continue;
             }
-            let hit = hot_corner_hit(&config.hot_corner);
+            let hit = hot_corner_hit(&cfg.hot_corner);
             if hit && armed {
                 let since = entered.get_or_insert_with(std::time::Instant::now);
-                if since.elapsed() >= std::time::Duration::from_millis(350) {
+                if since.elapsed() >= Duration::from_millis(350) {
                     show_main(&app).ok();
                     armed = false;
                 }
@@ -283,6 +328,7 @@ fn spawn_hot_corner(app: AppHandle) {
                 entered = None;
                 armed = true;
             }
+            std::thread::sleep(Duration::from_millis(50));
         }
     });
 }
