@@ -1,0 +1,87 @@
+name: Build main
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-main-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows packages
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build NSIS package
+        run: pnpm tauri build --bundles nsis
+
+      - name: Stage build artifacts
+        id: stage
+        shell: pwsh
+        run: |
+          $shortSha = "${{ github.event.workflow_run.head_sha }}".Substring(0, 7)
+          $outputDir = Join-Path $PWD "artifacts"
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not found."
+          }
+
+          Copy-Item $installer.FullName (Join-Path $outputDir $installer.Name)
+          Copy-Item "src-tauri/target/release/maydolist.exe" `
+            (Join-Path $outputDir "MayDolist-portable-$shortSha.exe")
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: MayDolist-windows-${{ steps.stage.outputs.short_sha }}
+          path: artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate, build, and publish
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@v4
+
+      - name: Validate tag and project versions
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$') {
+            Write-Error "Tag '$tag' is invalid. Expected a stable semantic version such as v1.2.3."
+            exit 1
+          }
+
+          $version = $Matches.version
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoContent = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargoContent -notmatch '(?m)^version\s*=\s*"(?<cargoVersion>[^"]+)"\s*$') {
+            Write-Error "Could not read the package version from src-tauri/Cargo.toml."
+            exit 1
+          }
+          $cargoVersion = $Matches.cargoVersion
+
+          $versions = [ordered]@{
+            "package.json" = $packageVersion
+            "src-tauri/Cargo.toml" = $cargoVersion
+            "src-tauri/tauri.conf.json" = $tauriVersion
+          }
+          $mismatches = $versions.GetEnumerator() | Where-Object Value -ne $version
+          if ($mismatches) {
+            foreach ($mismatch in $mismatches) {
+              Write-Error "$($mismatch.Key) has version '$($mismatch.Value)', expected '$version' from tag '$tag'."
+            }
+            exit 1
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build NSIS package
+        run: pnpm tauri build --bundles nsis
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $outputDir = Join-Path $PWD "release-assets"
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not found."
+          }
+
+          Copy-Item $installer.FullName `
+            (Join-Path $outputDir "MayDolist-setup-$version-x64.exe")
+          Copy-Item "src-tauri/target/release/maydolist.exe" `
+            (Join-Path $outputDir "MayDolist-portable-$version.exe")
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" `
+            "release-assets/MayDolist-setup-${{ steps.version.outputs.version }}-x64.exe" `
+            "release-assets/MayDolist-portable-${{ steps.version.outputs.version }}.exe" `
+            --verify-tag `
+            --generate-notes `
+            --title "MayDolist ${{ steps.version.outputs.tag }}"
