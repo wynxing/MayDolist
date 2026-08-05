@@ -2,8 +2,10 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api/note";
+import { useSettingsStore } from "../stores/settings";
 
 const id = new URLSearchParams(location.search).get("note")!;
+const settings = useSettingsStore();
 const note = ref<any>(null);
 const status = ref("");
 const loadError = ref("");
@@ -19,7 +21,9 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await Promise.all([settings.init(), load()]);
+});
 
 watch(
   note,
@@ -81,6 +85,6 @@ async function toggle() {
       <button aria-label="关闭悬浮便签" @click="dock">×</button>
     </header>
     <textarea v-if="!note.collapsed" v-model="note.content" class="input" aria-label="便签内容"></textarea>
-    <small v-if="!note.collapsed">{{ status }}</small>
+    <small v-if="!note.collapsed" class="floating-status">{{ status }}</small>
   </div>
 </template>
