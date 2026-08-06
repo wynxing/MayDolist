@@ -12,9 +12,23 @@ pub struct GhAuthStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct GhIgnoredItem {
+    pub number: u64,
+    /// `"pr"` or `"issue"`.
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RepoWatch {
     pub full_name: String,
     pub filters: Vec<String>,
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub ignored: Vec<GhIgnoredItem>,
+    #[serde(default)]
+    pub pinned: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

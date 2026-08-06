@@ -12,7 +12,7 @@ MayDolist 是一款面向 Windows 的「收纳式」桌面便签应用，平时�
 
 - 提供一个随时可唤出的主面板，收纳待办、便签、GitHub 进度与速记。
 - 便签可拖出为独立桌面悬浮小窗（置顶、可收起），贴近系统原生体验。
-- GitHub 追踪按项目（仓库）分组，展示未合并 PR 与「我的 / 被提及 / 被分配 / 参与」的 issue 与 PR。
+- GitHub 追踪按项目（仓库）分组并可折叠；默认展示过滤器命中的 PR / Issue，支持忽略与 `#xx` 手动钉住。
 - 所有数据保存在本机，数据目录可配置，离线可查看缓存。
 
 ### 1.2 目标用户
@@ -163,8 +163,8 @@ MayDolist/
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态
 └── github/
-    ├── watchlist.json       # 追踪仓库列表
-    └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt
+    ├── watchlist.json       # 追踪仓库：filters / collapsed / ignored / pinned
+    └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt（可重建）
 ```
 
 ### 5.2 实体规则
@@ -222,8 +222,10 @@ MayDolist/
 
 ### 6.5 GitHub 追踪
 
-- 按项目（仓库）分组，可增删追踪仓库。
-- 展示未合并 PR 与「我的 / 被提及 / 被分配 / 参与」的 issue 与 PR。
+- 按项目（仓库）分组，可增删追踪仓库；仓库面板支持折叠 / 展开，并持久化折叠状态与条目摘要（如 `3 PR · 2 Issue`）。
+- 默认只展示过滤器命中的 open Issue / PR（「我的 / 被提及 / 被分配 / 参与」）；可选开启「全部 PR」以拉取仓库全部未合并 PR。
+- 支持忽略条目：忽略名单写在 `github/watchlist.json`（非可重建 cache），刷新后仍保持隐藏；可用 `#xx` 手动加回。
+- 支持按仓库手动钉住：在展开的仓库内输入 `#123`，经 `gh api repos/{repo}/issues/{n}` 拉取后写入 `pinned`，与自动结果合并展示（标记「手动」）。
 - 数据经 `gh api`（`--paginate`）读取 REST 接口获取。
 - 手动刷新 + 定时刷新（默认 30 分钟，可配置）。
 - 刷新失败或离线时，展示上次本地快照并提示「刷新失败」。

@@ -1180,10 +1180,72 @@ textarea.input {
     justify-content: flex-end;
   }
 }
-.filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); }
-.gh-link { display: flex; width: 100%; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; gap: 8px; }
+.filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); flex-wrap: wrap; }
+.gh-link { display: flex; flex: 1; min-width: 0; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; gap: 8px; align-items: baseline; }
 .gh-link:hover { background: var(--card-hover); }
-.gh-link small { margin-left: auto; color: var(--accent); }
+.gh-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-link small { margin-left: auto; color: var(--accent); flex: none; }
+.gh-accordion-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+.gh-accordion-toggle h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.gh-chevron {
+  color: var(--muted);
+  width: 1em;
+  flex: none;
+}
+.snapshot.collapsed {
+  padding-bottom: 10px;
+}
+.gh-pin-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.gh-pin-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.gh-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.gh-item-row.dimmed .gh-link {
+  opacity: 0.55;
+}
+.gh-ignore {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 8px;
+  color: var(--muted);
+}
+.gh-ignore:hover {
+  color: var(--danger);
+}
+.btn.ghost {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.gh-empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
 .floating {
   position: relative;
   isolation: isolate;

@@ -6,10 +6,13 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
-use crate::models::{GhAuthStatus, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
+use crate::models::{
+    GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch,
+};
 use crate::storage::Storage;
 
-const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
+const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved", "all-prs"];
+const DEFAULT_FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
 
 pub struct GithubService {
     storage: Arc<Storage>,
@@ -98,7 +101,10 @@ impl GithubService {
         {
             list.push(RepoWatch {
                 full_name,
-                filters: FILTERS.iter().map(|v| v.to_string()).collect(),
+                filters: DEFAULT_FILTERS.iter().map(|v| v.to_string()).collect(),
+                collapsed: false,
+                ignored: vec![],
+                pinned: vec![],
             });
             self.save_watchlist(&list)?;
         }
@@ -123,6 +129,109 @@ impl GithubService {
         self.save_watchlist(&list)?;
         Ok(list)
     }
+
+    pub fn set_collapsed(&self, name: &str, collapsed: bool) -> AppResult<Vec<RepoWatch>> {
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == name)
+            .ok_or_else(|| AppError::NotFound(name.into()))?;
+        item.collapsed = collapsed;
+        self.save_watchlist(&list)?;
+        Ok(list)
+    }
+
+    pub fn ignore_item(
+        &self,
+        name: &str,
+        number: u64,
+        kind: String,
+    ) -> AppResult<Vec<RepoWatch>> {
+        if kind != "pr" && kind != "issue" {
+            return Err(AppError::InvalidInput(
+                "kind must be \"pr\" or \"issue\"".into(),
+            ));
+        }
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == name)
+            .ok_or_else(|| AppError::NotFound(name.into()))?;
+        item.pinned.retain(|&n| n != number);
+        if !item
+            .ignored
+            .iter()
+            .any(|v| v.number == number && v.kind == kind)
+        {
+            item.ignored.push(GhIgnoredItem {
+                number,
+                kind: kind.clone(),
+            });
+        }
+        let ignored = item.ignored.clone();
+        let pinned = item.pinned.clone();
+        self.save_watchlist(&list)?;
+        if let Some(mut snap) = self.snapshot(name)? {
+            apply_watch_prefs(&mut snap, &ignored, &pinned);
+            self.storage
+                .write_json(&cache_path(&self.storage, name), &snap)?;
+        }
+        Ok(list)
+    }
+
+    pub fn pin_item(&self, name: &str, number: u64) -> AppResult<RepoSnapshot> {
+        let full_name = normalize_repo(name)?;
+        let fetched = self.fetch_issue_or_pr(&full_name, number)?;
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == full_name)
+            .ok_or_else(|| AppError::NotFound(full_name.clone()))?;
+        item.ignored.retain(|v| v.number != number);
+        if !item.pinned.contains(&number) {
+            item.pinned.push(number);
+        }
+        let ignored = item.ignored.clone();
+        let pinned = item.pinned.clone();
+        self.save_watchlist(&list)?;
+
+        let mut snapshot = self.snapshot(&full_name)?.unwrap_or_else(|| RepoSnapshot {
+            schema_version: 1,
+            repo: full_name.clone(),
+            fetched_at: now_rfc3339(),
+            last_success_at: None,
+            last_error: None,
+            issues: vec![],
+            pull_requests: vec![],
+        });
+        merge_pinned_item(&mut snapshot, fetched);
+        apply_watch_prefs(&mut snapshot, &ignored, &pinned);
+        sort_snapshot(&mut snapshot);
+        self.storage
+            .write_json(&cache_path(&self.storage, &full_name), &snapshot)?;
+        Ok(snapshot)
+    }
+
+    pub fn unpin_item(&self, name: &str, number: u64) -> AppResult<Vec<RepoWatch>> {
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == name)
+            .ok_or_else(|| AppError::NotFound(name.into()))?;
+        item.pinned.retain(|&n| n != number);
+        let ignored = item.ignored.clone();
+        let pinned = item.pinned.clone();
+        self.save_watchlist(&list)?;
+        if let Some(mut snap) = self.snapshot(name)? {
+            strip_pin_marker(&mut snap, number);
+            apply_watch_prefs(&mut snap, &ignored, &pinned);
+            sort_snapshot(&mut snap);
+            self.storage
+                .write_json(&cache_path(&self.storage, name), &snap)?;
+        }
+        Ok(list)
+    }
+
     pub fn snapshot(&self, repo: &str) -> AppResult<Option<RepoSnapshot>> {
         self.storage.read_json(&cache_path(&self.storage, repo))
     }
@@ -182,22 +291,33 @@ impl GithubService {
             .user
             .ok_or_else(|| AppError::Github("GitHub CLI 未登录或离线".into()))?;
         let watches = self.watchlist()?;
-        let filters = watches
+        let watch = watches
             .iter()
             .find(|v| v.full_name == repo)
-            .map(|v| v.filters.clone())
-            .unwrap_or_else(|| FILTERS.iter().map(|v| v.to_string()).collect());
+            .cloned()
+            .unwrap_or_else(|| RepoWatch {
+                full_name: repo.into(),
+                filters: DEFAULT_FILTERS.iter().map(|v| v.to_string()).collect(),
+                collapsed: false,
+                ignored: vec![],
+                pinned: vec![],
+            });
+        let filters = watch.filters.clone();
         let mut issues: HashMap<(u64, String), GhIssue> = HashMap::new();
         let mut prs: HashMap<u64, GhPullRequest> = HashMap::new();
-        let all_prs: Vec<ApiItem> = gh_json(&[
-            "api",
-            "--paginate",
-            &format!("repos/{repo}/pulls?state=open&per_page=100"),
-        ])?;
-        for row in all_prs {
-            prs.insert(row.number, row.into_pr(vec!["open".into()]));
+
+        if filters.iter().any(|v| v == "all-prs") {
+            let all_prs: Vec<ApiItem> = gh_json(&[
+                "api",
+                "--paginate",
+                &format!("repos/{repo}/pulls?state=open&per_page=100"),
+            ])?;
+            for row in all_prs {
+                prs.insert(row.number, row.into_pr(vec!["all-prs".into()]));
+            }
         }
-        for filter in &filters {
+
+        for filter in filters.iter().filter(|v| v.as_str() != "all-prs") {
             let qualifier = match filter.as_str() {
                 "mine" => format!("author:{user}"),
                 "mentioned" => format!("mentions:{user}"),
@@ -232,7 +352,7 @@ impl GithubService {
                                     v.matches.push(filter.clone())
                                 }
                             })
-                            .or_insert_with(|| row.into_pr(vec![filter.clone()]));
+                            .or_insert_with(|| row.clone().into_pr(vec![filter.clone()]));
                     } else {
                         issues
                             .entry((row.number, row.html_url.clone()))
@@ -250,8 +370,44 @@ impl GithubService {
                 page += 1;
             }
         }
+
+        for &number in &watch.pinned {
+            let already_pr = prs.contains_key(&number);
+            let already_issue = issues.keys().any(|(n, _)| *n == number);
+            if already_pr || already_issue {
+                if let Some(pr) = prs.get_mut(&number) {
+                    if !pr.matches.iter().any(|m| m == "pinned") {
+                        pr.matches.push("pinned".into());
+                    }
+                }
+                for ((n, _), issue) in issues.iter_mut() {
+                    if *n == number && !issue.matches.iter().any(|m| m == "pinned") {
+                        issue.matches.push("pinned".into());
+                    }
+                }
+                continue;
+            }
+            match self.fetch_issue_or_pr(repo, number) {
+                Ok(FetchedItem::Pr(mut pr)) => {
+                    if !pr.matches.iter().any(|m| m == "pinned") {
+                        pr.matches.push("pinned".into());
+                    }
+                    prs.insert(number, pr);
+                }
+                Ok(FetchedItem::Issue(mut issue)) => {
+                    if !issue.matches.iter().any(|m| m == "pinned") {
+                        issue.matches.push("pinned".into());
+                    }
+                    issues.insert((number, issue.url.clone()), issue);
+                }
+                Err(_) => {
+                    // Keep refresh succeeding if a pinned item vanished.
+                }
+            }
+        }
+
         let now = now_rfc3339();
-        let snapshot = RepoSnapshot {
+        let mut snapshot = RepoSnapshot {
             schema_version: 1,
             repo: repo.into(),
             fetched_at: now.clone(),
@@ -260,10 +416,121 @@ impl GithubService {
             issues: issues.into_values().collect(),
             pull_requests: prs.into_values().collect(),
         };
+        apply_watch_prefs(
+            &mut snapshot,
+            watch.ignored.as_slice(),
+            watch.pinned.as_slice(),
+        );
+        sort_snapshot(&mut snapshot);
         self.storage
             .write_json(&cache_path(&self.storage, repo), &snapshot)?;
         Ok(snapshot)
     }
+
+    fn fetch_issue_or_pr(&self, repo: &str, number: u64) -> AppResult<FetchedItem> {
+        let path = format!("repos/{repo}/issues/{number}");
+        let row: ApiItem = gh_json(&["api", &path]).map_err(|err| {
+            let msg = err.to_string();
+            if msg.contains("404") || msg.contains("Not Found") {
+                AppError::Github(format!("#{number} 不存在"))
+            } else {
+                err
+            }
+        })?;
+        if row.pull_request.is_some() {
+            Ok(FetchedItem::Pr(row.into_pr(vec!["pinned".into()])))
+        } else {
+            Ok(FetchedItem::Issue(row.into_issue(vec!["pinned".into()])))
+        }
+    }
+}
+
+enum FetchedItem {
+    Pr(GhPullRequest),
+    Issue(GhIssue),
+}
+
+fn merge_pinned_item(snapshot: &mut RepoSnapshot, item: FetchedItem) {
+    match item {
+        FetchedItem::Pr(pr) => {
+            snapshot.issues.retain(|v| v.number != pr.number);
+            if let Some(existing) = snapshot
+                .pull_requests
+                .iter_mut()
+                .find(|v| v.number == pr.number)
+            {
+                if !existing.matches.iter().any(|m| m == "pinned") {
+                    existing.matches.push("pinned".into());
+                }
+            } else {
+                snapshot.pull_requests.push(pr);
+            }
+        }
+        FetchedItem::Issue(issue) => {
+            snapshot.pull_requests.retain(|v| v.number != issue.number);
+            if let Some(existing) = snapshot.issues.iter_mut().find(|v| v.number == issue.number) {
+                if !existing.matches.iter().any(|m| m == "pinned") {
+                    existing.matches.push("pinned".into());
+                }
+            } else {
+                snapshot.issues.push(issue);
+            }
+        }
+    }
+}
+
+fn strip_pin_marker(snapshot: &mut RepoSnapshot, number: u64) {
+    if let Some(pr) = snapshot
+        .pull_requests
+        .iter_mut()
+        .find(|v| v.number == number)
+    {
+        pr.matches.retain(|m| m != "pinned");
+        if pr.matches.is_empty() {
+            snapshot.pull_requests.retain(|v| v.number != number);
+        }
+    }
+    if let Some(issue) = snapshot.issues.iter_mut().find(|v| v.number == number) {
+        issue.matches.retain(|m| m != "pinned");
+        if issue.matches.is_empty() {
+            snapshot.issues.retain(|v| v.number != number);
+        }
+    }
+}
+
+fn apply_watch_prefs(snapshot: &mut RepoSnapshot, ignored: &[GhIgnoredItem], pinned: &[u64]) {
+    snapshot.pull_requests.retain(|pr| {
+        !ignored
+            .iter()
+            .any(|v| v.number == pr.number && v.kind == "pr")
+    });
+    snapshot.issues.retain(|issue| {
+        !ignored
+            .iter()
+            .any(|v| v.number == issue.number && v.kind == "issue")
+    });
+    for pr in &mut snapshot.pull_requests {
+        if pinned.contains(&pr.number) && !pr.matches.iter().any(|m| m == "pinned") {
+            pr.matches.push("pinned".into());
+        }
+    }
+    for issue in &mut snapshot.issues {
+        if pinned.contains(&issue.number) && !issue.matches.iter().any(|m| m == "pinned") {
+            issue.matches.push("pinned".into());
+        }
+    }
+}
+
+fn sort_snapshot(snapshot: &mut RepoSnapshot) {
+    let pinned_first = |matches: &[String], number: u64| -> (bool, u64) {
+        (!matches.iter().any(|m| m == "pinned"), u64::MAX - number)
+    };
+    snapshot
+        .pull_requests
+        .sort_by_key(|pr| pinned_first(&pr.matches, pr.number));
+    snapshot
+        .issues
+        .sort_by_key(|issue| pinned_first(&issue.matches, issue.number));
 }
 
 #[derive(Deserialize, Clone)]

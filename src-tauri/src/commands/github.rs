@@ -54,6 +54,65 @@ pub fn github_watch_filters(
 }
 
 #[tauri::command]
+pub fn github_watch_collapsed(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    full_name: String,
+    collapsed: bool,
+) -> AppResult<Vec<RepoWatch>> {
+    let v = state
+        .services
+        .github
+        .set_collapsed(&full_name, collapsed)?;
+    emit_entity_changed(&app, "github", "watchlist", "updated")?;
+    Ok(v)
+}
+
+#[tauri::command]
+pub fn github_ignore_item(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    full_name: String,
+    number: u64,
+    kind: String,
+) -> AppResult<Vec<RepoWatch>> {
+    let v = state
+        .services
+        .github
+        .ignore_item(&full_name, number, kind)?;
+    emit_entity_changed(&app, "github", &full_name, "updated")?;
+    Ok(v)
+}
+
+#[tauri::command]
+pub async fn github_pin_item(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    full_name: String,
+    number: u64,
+) -> AppResult<RepoSnapshot> {
+    let github = state.services.github.clone();
+    let repo = full_name.clone();
+    let v = tauri::async_runtime::spawn_blocking(move || github.pin_item(&repo, number))
+        .await
+        .map_err(|e| crate::error::AppError::Internal(e.to_string()))??;
+    emit_entity_changed(&app, "github", &full_name, "updated")?;
+    Ok(v)
+}
+
+#[tauri::command]
+pub fn github_unpin_item(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    full_name: String,
+    number: u64,
+) -> AppResult<Vec<RepoWatch>> {
+    let v = state.services.github.unpin_item(&full_name, number)?;
+    emit_entity_changed(&app, "github", &full_name, "updated")?;
+    Ok(v)
+}
+
+#[tauri::command]
 pub async fn github_refresh_repo(
     state: State<'_, AppState>,
     app: AppHandle,
