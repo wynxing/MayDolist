@@ -1,5 +1,6 @@
 version: 2
 updates:
+  # Actions majors are usually safe; keep them, but cap open PRs.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -7,8 +8,9 @@ updates:
       day: monday
       time: "02:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
 
+  # npm: only patch/minor — major bumps need intentional review.
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -16,8 +18,12 @@ updates:
       day: monday
       time: "02:15"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
+  # cargo: same policy — skip major bumps.
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
@@ -25,4 +31,7 @@ updates:
       day: monday
       time: "02:30"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
