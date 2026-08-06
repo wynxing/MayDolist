@@ -44,7 +44,8 @@ onMounted(async () => {
 
 <template>
   <div class="shell">
-    <header class="titlebar" data-tauri-drag-region>
+    <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
+    <header class="titlebar">
       <b class="brand">MayDolist</b>
       <nav class="tabs">
         <button

@@ -63,12 +63,13 @@ async function toggle() {
   note.value.collapsed = !note.value.collapsed;
   const { LogicalSize } = await import("@tauri-apps/api/dpi");
   await getCurrentWindow().setSize(
-    new LogicalSize(360, note.value.collapsed ? 46 : 280)
+    new LogicalSize(360, note.value.collapsed ? 56 : 280)
   );
 }
 </script>
 <template>
   <div v-if="loadError" class="floating">
+    <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
     <header>
       <b class="floating-error">加载失败</b>
       <button aria-label="重新加载便签" @click="load">重试</button>
@@ -77,7 +78,8 @@ async function toggle() {
     <small class="floating-error">{{ loadError }}</small>
   </div>
   <div v-else-if="note" class="floating" :class="{ collapsed: note.collapsed }">
-    <header data-tauri-drag-region>
+    <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
+    <header>
       <input v-model="note.title" class="floating-title" aria-label="便签标题" />
       <button :aria-label="note.collapsed ? '展开便签' : '收起便签'" @click="toggle">
         {{ note.collapsed ? "▾" : "▴" }}
