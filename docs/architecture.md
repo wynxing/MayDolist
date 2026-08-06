@@ -159,7 +159,7 @@ sequenceDiagram
 
 ```text
 MayDolist/
-├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔
+├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态
 └── github/
@@ -180,6 +180,20 @@ MayDolist/
 - 全部写入走**单进程原子写**：临时文件 + 重命名，避免写一半损坏。
 - Rust 单写者（Mutex 串行化写盘），多窗口并发安全。
 - 先写盘，成功后广播数据变更事件。
+
+### 5.4 配置与玻璃透明度
+
+`config.json` 使用 `schemaVersion` 管理结构演进。玻璃透明度相关配置键：
+
+- `mainWindowGlassOpacity`：主面板玻璃背景层 alpha，范围 `0.4..=1.0`。
+- `floatingNoteGlassOpacity`：悬浮便签玻璃背景层 alpha，范围 `0.4..=1.0`。
+
+相关规则：
+
+- **支持环境基线**：当前 Windows 11 + WebView2 是唯一受支持环境。玻璃效果只针对该环境渲染，不维护 Windows 10、旧版 WebView2 或缺失 Acrylic 能力环境的降级路径。
+- **兼容 schema 升级**：新增配置字段提供 serde 默认值。加载旧 `config.json` 时保留原主题、快捷键、热角和数据目录，补齐新字段、升级 `schemaVersion` 并回写；只有 JSON 损坏或结构不可恢复时才隔离备份。
+- **范围校验与容错**：`settings_update` 拒绝写入越界透明度；加载时对越界值做 clamp（`0.4..=1.0`）并回写，容忍手工编辑导致的错误值。
+- **多窗口应用**：主面板与每个悬浮便签窗读取对应透明度配置，通过 `settings-changed` 事件广播同步。
 
 ## 6. 关键流程
 

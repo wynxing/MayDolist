@@ -69,6 +69,9 @@ impl Storage {
                     config.data_dir = self.data_dir().display().to_string();
                     self.save_config(&config)?;
                 }
+                if config.sanitize() {
+                    self.save_config(&config)?;
+                }
                 Ok(config)
             }
             Ok(None) => {
@@ -337,7 +340,7 @@ fn validate_json_tree(root: &Path) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::config::CONFIG_SCHEMA_VERSION;
+    use crate::models::config::{CONFIG_SCHEMA_VERSION, GLASS_OPACITY_MAX, GLASS_OPACITY_MIN};
     use std::sync::OnceLock;
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -457,5 +460,83 @@ mod tests {
         std::env::remove_var("MAYDOLIST_DATA_DIR");
         assert_ne!(resolve_data_dir(), custom);
         fs::remove_dir_all(&custom).ok();
+    }
+
+    #[test]
+    fn glass_opacity_fields_roundtrip() {
+        let dir = temp_dir("glass-roundtrip");
+        let storage = Storage::with_dir(&dir).unwrap();
+        let config = AppConfig {
+            main_window_glass_opacity: 0.62,
+            floating_note_glass_opacity: 0.44,
+            ..Default::default()
+        };
+        storage.save_config(&config).unwrap();
+        let loaded = storage.load_config().unwrap();
+        assert_eq!(loaded.main_window_glass_opacity, 0.62);
+        assert_eq!(loaded.floating_note_glass_opacity, 0.44);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_of_range_opacity_is_clamped_on_load() {
+        let dir = temp_dir("glass-clamp");
+        let storage = Storage::with_dir(&dir).unwrap();
+        let config = AppConfig {
+            main_window_glass_opacity: 0.05,
+            floating_note_glass_opacity: 2.0,
+            ..Default::default()
+        };
+        storage.save_config(&config).unwrap();
+        let loaded = storage.load_config().unwrap();
+        assert_eq!(loaded.main_window_glass_opacity, GLASS_OPACITY_MIN);
+        assert_eq!(loaded.floating_note_glass_opacity, GLASS_OPACITY_MAX);
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
+        assert_eq!(persisted["mainWindowGlassOpacity"], GLASS_OPACITY_MIN);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn old_schema_config_is_upgraded_without_losing_settings() {
+        let dir = temp_dir("old-schema");
+        let storage = Storage::with_dir(&dir).unwrap();
+        let legacy = r#"{
+            "schemaVersion": 1,
+            "dataDir": null,
+            "hotCorner": "top-right",
+            "hotkey": "Ctrl+Alt+M",
+            "theme": "dark",
+            "githubRefreshIntervalMinutes": 30,
+            "autostart": false,
+            "firstRun": true
+        }"#;
+        fs::write(storage.config_path(), legacy).unwrap();
+        let config = storage.load_config().unwrap();
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.theme, "dark");
+        assert_eq!(config.hot_corner, "top-right");
+        assert_eq!(config.hotkey, "Ctrl+Alt+M");
+        assert!(config.main_window_glass_opacity > 0.0);
+        assert!(config.floating_note_glass_opacity > 0.0);
+        let backups: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("config.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(
+            backups.len(),
+            0,
+            "valid legacy config must not be quarantined"
+        );
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
+        assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
+        assert!(persisted.get("mainWindowGlassOpacity").is_some());
+        fs::remove_dir_all(&dir).ok();
     }
 }
