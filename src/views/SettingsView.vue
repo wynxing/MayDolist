@@ -32,6 +32,16 @@ async function save() {
   message.value = "设置已保存";
 }
 
+function previewOpacity(
+  key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity",
+  event: Event
+) {
+  if (!settings.config) return;
+  const value = Number((event.target as HTMLInputElement).value);
+  settings.config[key] = value;
+  void settings.previewGlass(key, value);
+}
+
 async function migrate() {
   if (!target.value) return;
   const dataDir = await settings.migrate(target.value);
@@ -108,6 +118,50 @@ async function action(kind: string, id: string, command: string) {
             <span>启动 Windows 时运行</span>
           </label>
         </div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn primary" @click="save">应用设置</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>玻璃透明度</h3>
+      <p class="settings-note">仅调整玻璃背景层的不透明度，不影响文字与控件。40% 为最低可用值。</p>
+      <div class="settings-grid">
+        <label class="settings-row">
+          <span>主面板透明度</span>
+          <span class="settings-control slider-control">
+            <input
+              type="range"
+              min="0.4"
+              max="1"
+              step="0.01"
+              :value="settings.config.mainWindowGlassOpacity"
+              aria-label="主面板玻璃透明度"
+              @input="previewOpacity('mainWindowGlassOpacity', $event)"
+            />
+            <b class="slider-value">{{ Math.round(settings.config.mainWindowGlassOpacity * 100) }}%</b>
+          </span>
+        </label>
+
+        <label class="settings-row">
+          <span>
+            悬浮便签透明度
+            <small>统一作用于全部悬浮便签</small>
+          </span>
+          <span class="settings-control slider-control">
+            <input
+              type="range"
+              min="0.4"
+              max="1"
+              step="0.01"
+              :value="settings.config.floatingNoteGlassOpacity"
+              aria-label="悬浮便签玻璃透明度"
+              @input="previewOpacity('floatingNoteGlassOpacity', $event)"
+            />
+            <b class="slider-value">{{ Math.round(settings.config.floatingNoteGlassOpacity * 100) }}%</b>
+          </span>
+        </label>
       </div>
       <div class="settings-actions">
         <button class="btn primary" @click="save">应用设置</button>

@@ -2,7 +2,8 @@
 
 ## 本地环境
 
-- Windows 10/11 与 WebView2 Runtime
+- Windows 11（玻璃效果与视觉基线仅针对 Windows 11 + WebView2 校准，不维护旧系统降级路径）
+- WebView2 Runtime
 - Node.js 22+、pnpm 11+
 - Rust stable MSVC toolchain，包含 `rustfmt` 与 `clippy`
 - 可选：GitHub CLI `gh`（运行 GitHub 追踪功能需要）
@@ -72,3 +73,12 @@ git push origin v1.2.3
 当前自动构建不对 Windows 安装器和便携版执行代码签名，因此用户下载或首次运行时可能看到 Microsoft Defender SmartScreen 提示。后续接入可信代码签名证书时，应将证书和密码存储为 GitHub Actions secrets，不要提交到仓库。
 
 应用不会打包或读取 GitHub token；GitHub 登录统一使用 `gh auth login`。
+
+## 玻璃透明度与配置升级
+
+设置页提供「玻璃透明度」主面板与悬浮便签两个滑块，范围 40%–100%，对应配置键：
+
+- `mainWindowGlassOpacity`（主面板）
+- `floatingNoteGlassOpacity`（悬浮便签）
+
+该配置采用兼容 schema 升级：旧版 `config.json` 会保留已有主题、快捷键、热角和数据目录，自动补齐玻璃透明度并升级 `schemaVersion`。只有 JSON 损坏或结构不可恢复时才会隔离备份并按默认值重建。视觉基线仅针对当前 Windows 11 + WebView2 环境，不维护旧系统或缺失玻璃能力环境的降级样式。

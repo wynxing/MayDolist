@@ -5,6 +5,7 @@ import { call } from "../api";
 import { useSettingsStore } from "../stores/settings";
 
 const settings = useSettingsStore();
+const buildId = __BUILD_ID__;
 const active = ref("todo");
 const tabs = [
   ["todo", "待办"],
@@ -66,6 +67,7 @@ onMounted(async () => {
     <footer class="statusbar">
       <span v-if="settings.error" class="error">{{ settings.error }}</span>
       <span v-else>{{ settings.config?.dataDir || "MayDolist 本地数据" }}</span>
+      <span class="build-id" :title="`Frontend build ${buildId}`">build {{ buildId }}</span>
     </footer>
   </div>
 </template>

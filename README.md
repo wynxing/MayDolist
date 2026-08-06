@@ -36,7 +36,7 @@ graph LR
 
 ```text
 MayDolist/
-├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔
+├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：多列表、完成与软删除状态
 └── github/
@@ -60,7 +60,7 @@ MayDolist/
 
 - Rust（通过 rustup 安装）
 - Node.js 22+ 与 pnpm
-- WebView2（Windows 11 自带，Windows 10 需安装）
+- WebView2 Runtime（玻璃效果与视觉基线仅针对 Windows 11 + WebView2 校准）
 
 ```powershell
 pnpm install

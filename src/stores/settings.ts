@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "../api/config";
 import type { AppConfig } from "../types/config";
 
@@ -10,7 +10,10 @@ export const useSettingsStore = defineStore("settings", () => {
 
   let initPromise: Promise<void> | null = null;
   let unlistenSettings: UnlistenFn | null = null;
+  let unlistenGlassPreview: UnlistenFn | null = null;
   let systemTheme: MediaQueryList | null = null;
+
+  const isFloatingWindow = new URLSearchParams(location.search).has("note");
 
   const applyTheme = () => {
     const value = config.value?.theme ?? "system";
@@ -22,6 +25,22 @@ export const useSettingsStore = defineStore("settings", () => {
         : value;
     document.documentElement.dataset.theme = resolved;
   };
+
+  const applyGlass = () => {
+    const value = config.value
+      ? isFloatingWindow
+        ? config.value.floatingNoteGlassOpacity
+        : config.value.mainWindowGlassOpacity
+      : undefined;
+    document.documentElement.dataset.window = isFloatingWindow ? "floating" : "main";
+    if (value !== undefined) {
+      document.documentElement.style.setProperty("--glass-opacity", String(value));
+    }
+  };
+
+  const appliesToWindow = (
+    key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity"
+  ) => (key === "floatingNoteGlassOpacity") === isFloatingWindow;
 
   const init = () => {
     if (initPromise) return initPromise;
@@ -35,15 +54,30 @@ export const useSettingsStore = defineStore("settings", () => {
           config.value = event.payload;
           error.value = null;
           applyTheme();
+          applyGlass();
+        });
+        unlistenGlassPreview = await listen<{
+          key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity";
+          opacity: number;
+        }>("glass-preview", (event) => {
+          if (appliesToWindow(event.payload.key)) {
+            document.documentElement.style.setProperty(
+              "--glass-opacity",
+              String(event.payload.opacity)
+            );
+          }
         });
 
         config.value = await api.get();
         error.value = null;
         applyTheme();
+        applyGlass();
       } catch (e) {
         error.value = String(e);
         unlistenSettings?.();
         unlistenSettings = null;
+        unlistenGlassPreview?.();
+        unlistenGlassPreview = null;
         systemTheme?.removeEventListener("change", applyTheme);
         systemTheme = null;
         initPromise = null;
@@ -58,6 +92,18 @@ export const useSettingsStore = defineStore("settings", () => {
     config.value = await api.update({ ...config.value, ...patch });
     error.value = null;
     applyTheme();
+    applyGlass();
+  };
+
+  /** Live preview of a glass opacity value without persisting it. */
+  const previewGlass = async (
+    key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity",
+    opacity: number
+  ) => {
+    if (appliesToWindow(key)) {
+      document.documentElement.style.setProperty("--glass-opacity", String(opacity));
+    }
+    await emit("glass-preview", { key, opacity });
   };
 
   return {
@@ -65,6 +111,8 @@ export const useSettingsStore = defineStore("settings", () => {
     error,
     init,
     update,
+    previewGlass,
+    isFloatingWindow,
     migrate: api.migrate,
     setAutostart: api.autostart,
   };

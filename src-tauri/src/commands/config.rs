@@ -10,6 +10,8 @@ pub fn get_data_dir(state: State<'_, AppState>) -> String {
 }
 #[tauri::command]
 pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> AppResult<AppConfig> {
+    let mut config = config;
+    config.sanitize();
     state.storage.save_config(&config)?;
     Ok(config)
 }
