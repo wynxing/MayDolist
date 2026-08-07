@@ -1087,6 +1087,74 @@ textarea.input {
   user-select: text;
 }
 
+.update-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.update-heading h3 {
+  margin-bottom: 5px;
+}
+
+.update-version {
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.update-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.update-summary > div,
+.update-release {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.update-summary small,
+.update-summary strong {
+  display: block;
+}
+
+.update-summary small,
+.update-release small {
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.update-release {
+  margin-top: 12px;
+}
+
+.update-release p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.update-error {
+  color: var(--danger);
+  margin: 12px 0 0;
+}
+
+.update-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .settings-migrate {
   display: flex;
   gap: 8px;
@@ -1141,6 +1209,10 @@ textarea.input {
 }
 
 @media (max-width: 620px) {
+  .update-summary {
+    grid-template-columns: 1fr;
+  }
+
   .settings {
     padding: 0 16px;
   }

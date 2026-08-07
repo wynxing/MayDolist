@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
-use crate::models::{
-    GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch,
-};
+use crate::models::{GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
 use crate::storage::Storage;
 
 const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved", "all-prs"];
@@ -141,12 +139,7 @@ impl GithubService {
         Ok(list)
     }
 
-    pub fn ignore_item(
-        &self,
-        name: &str,
-        number: u64,
-        kind: String,
-    ) -> AppResult<Vec<RepoWatch>> {
+    pub fn ignore_item(&self, name: &str, number: u64, kind: String) -> AppResult<Vec<RepoWatch>> {
         if kind != "pr" && kind != "issue" {
             return Err(AppError::InvalidInput(
                 "kind must be \"pr\" or \"issue\"".into(),
@@ -468,7 +461,11 @@ fn merge_pinned_item(snapshot: &mut RepoSnapshot, item: FetchedItem) {
         }
         FetchedItem::Issue(issue) => {
             snapshot.pull_requests.retain(|v| v.number != issue.number);
-            if let Some(existing) = snapshot.issues.iter_mut().find(|v| v.number == issue.number) {
+            if let Some(existing) = snapshot
+                .issues
+                .iter_mut()
+                .find(|v| v.number == issue.number)
+            {
                 if !existing.matches.iter().any(|m| m == "pinned") {
                     existing.matches.push("pinned".into());
                 }

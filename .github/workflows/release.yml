@@ -98,10 +98,23 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Validate updater signing secret
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "TAURI_SIGNING_PRIVATE_KEY is required to publish updater assets."
+          }
+
       - name: Build NSIS package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles nsis
 
       - name: Stage release assets
+        id: stage
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
@@ -114,10 +127,51 @@ jobs:
             throw "NSIS installer was not found."
           }
 
-          Copy-Item $installer.FullName `
-            (Join-Path $outputDir "MayDolist-setup-$version-x64.exe")
+          $signaturePath = "$($installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $signaturePath -PathType Leaf)) {
+            throw "Updater signature was not generated for $($installer.Name)."
+          }
+
+          $installerName = "MayDolist-setup-$version-x64.exe"
+          $signatureName = "$installerName.sig"
+          Copy-Item $installer.FullName (Join-Path $outputDir $installerName)
+          Copy-Item $signaturePath (Join-Path $outputDir $signatureName)
           Copy-Item "src-tauri/target/release/maydolist.exe" `
             (Join-Path $outputDir "MayDolist-portable-$version.exe")
+
+          $signature = (Get-Content (Join-Path $outputDir $signatureName) -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($signature)) {
+            throw "Updater signature is empty."
+          }
+
+          $notes = "See the GitHub Release page for changes in this version."
+          $metadata = [ordered]@{
+            version = $version
+            notes = $notes
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url = "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/$installerName"
+              }
+            }
+          }
+          $metadata | ConvertTo-Json -Depth 6 | Set-Content `
+            (Join-Path $outputDir "latest.json") -Encoding utf8
+
+          $latest = Get-Content (Join-Path $outputDir "latest.json") -Raw | ConvertFrom-Json
+          if ($latest.version -ne $version) {
+            throw "latest.json version does not match the release tag."
+          }
+          if ($latest.platforms.'windows-x86_64'.signature -ne $signature) {
+            throw "latest.json does not contain the generated signature."
+          }
+          if (-not $latest.platforms.'windows-x86_64'.url.EndsWith($installerName)) {
+            throw "latest.json references the wrong installer."
+          }
+
+          "installer_name=$installerName" >> $env:GITHUB_OUTPUT
+          "signature_name=$signatureName" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release
         shell: pwsh
@@ -125,8 +179,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" `
-            "release-assets/MayDolist-setup-${{ steps.version.outputs.version }}-x64.exe" `
+            "release-assets/${{ steps.stage.outputs.installer_name }}" `
+            "release-assets/${{ steps.stage.outputs.signature_name }}" `
             "release-assets/MayDolist-portable-${{ steps.version.outputs.version }}.exe" `
+            "release-assets/latest.json" `
             --verify-tag `
             --generate-notes `
             --title "MayDolist ${{ steps.version.outputs.tag }}"

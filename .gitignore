@@ -18,6 +18,7 @@ dist-ssr
 
 # Tauri
 src-tauri/target
+.tauri-keys/
 
 # Editor directories and files
 .vscode/*

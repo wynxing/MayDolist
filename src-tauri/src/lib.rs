@@ -37,6 +37,8 @@ pub fn run() {
             app::show_main(app).ok();
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .args(["--autostart"])
@@ -103,6 +105,7 @@ pub fn run() {
             commands::github::github_refresh_repo,
             commands::github::github_refresh_all,
             commands::github::github_get_snapshot,
+            commands::update::update_runtime_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

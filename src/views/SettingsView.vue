@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { call } from "../api";
 import { useSettingsStore } from "../stores/settings";
+import { useUpdateStore } from "../stores/update";
 
 type TrashRow = { id: string; title: string };
 type Trash = {
@@ -11,6 +12,7 @@ type Trash = {
 };
 
 const settings = useSettingsStore();
+const updater = useUpdateStore();
 const target = ref("");
 const trash = ref<Trash | null>(null);
 const message = ref("");
@@ -23,8 +25,13 @@ const trashGroups = [
 
 onMounted(async () => {
   await settings.init();
+  await updater.init();
   trash.value = await call<Trash>("trash_list");
 });
+
+function formatCheckTime(value: string | null) {
+  return value ? new Date(value).toLocaleString("zh-CN") : "尚未检查";
+}
 
 async function save() {
   if (!settings.config) return;
@@ -165,6 +172,34 @@ async function action(kind: string, id: string, command: string) {
       </div>
       <div class="settings-actions">
         <button class="btn primary" @click="save">应用设置</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="update-heading">
+        <div>
+          <h3>关于与更新</h3>
+          <p class="settings-note">安装版可安全下载并安装签名更新；便携版仅跳转到 GitHub Release。</p>
+        </div>
+        <span class="update-version">v{{ updater.runtime?.currentVersion ?? "—" }}</span>
+      </div>
+      <div class="update-summary">
+        <div><small>运行方式</small><strong>{{ updater.runtime?.portable ? "便携版 / 开发版" : "NSIS 安装版" }}</strong></div>
+        <div><small>上次检查</small><strong>{{ formatCheckTime(updater.lastCheckAt) }}</strong></div>
+        <div><small>状态</small><strong>{{ updater.status === "checking" ? "正在检查" : updater.status === "up-to-date" ? "已是最新版" : updater.status === "available" ? `发现 v${updater.available?.version}` : updater.status === "downloading" ? "正在下载" : updater.status === "ready-to-restart" ? "等待重启" : updater.status === "failed" ? "检查失败" : "尚未检查" }}</strong></div>
+      </div>
+      <div v-if="updater.available" class="update-release">
+        <strong>MayDolist v{{ updater.available.version }}</strong>
+        <small v-if="updater.available.date">{{ new Date(updater.available.date).toLocaleDateString("zh-CN") }}</small>
+        <p>{{ updater.available.body || "此版本没有发行说明。" }}</p>
+      </div>
+      <p v-if="updater.status === 'downloading'" class="settings-note" role="status">正在下载更新{{ updater.downloadPercent === null ? "…" : `：${updater.downloadPercent}%` }}</p>
+      <p v-if="updater.error" class="update-error" role="alert">{{ updater.error }}</p>
+      <div class="settings-actions update-actions">
+        <button class="btn" :disabled="updater.busy" @click="updater.checkForUpdates(true)">{{ updater.status === "checking" ? "检查中…" : "检查更新" }}</button>
+        <button v-if="updater.available && !updater.runtime?.portable" class="btn primary" :disabled="updater.busy" @click="updater.install">{{ updater.status === "downloading" ? "正在安装…" : "下载并安装" }}</button>
+        <button v-if="updater.available || updater.runtime?.portable" class="btn" @click="updater.openRelease">打开 Release</button>
+        <button v-if="updater.status === 'ready-to-restart'" class="btn primary" @click="updater.relaunch">重启并完成更新</button>
       </div>
     </div>
 

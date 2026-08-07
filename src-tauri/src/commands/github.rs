@@ -60,10 +60,7 @@ pub fn github_watch_collapsed(
     full_name: String,
     collapsed: bool,
 ) -> AppResult<Vec<RepoWatch>> {
-    let v = state
-        .services
-        .github
-        .set_collapsed(&full_name, collapsed)?;
+    let v = state.services.github.set_collapsed(&full_name, collapsed)?;
     emit_entity_changed(&app, "github", "watchlist", "updated")?;
     Ok(v)
 }
