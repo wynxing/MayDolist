@@ -65,6 +65,15 @@ git push origin v1.2.3
 
 - `MayDolist-setup-<version>-x64.exe`
 - `MayDolist-portable-<version>.exe`
+- `MayDolist-setup-<version>-x64.exe.sig`（应用内更新签名）
+- `latest.json`（Tauri updater 元数据）
+
+发布前需要在仓库 Actions Secrets 中配置：
+
+- `TAURI_SIGNING_PRIVATE_KEY`：与应用内 updater 公钥配对的私钥全文。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码；无密码密钥可留空。
+
+私钥不得提交到仓库。若私钥丢失，已发布客户端将无法验证使用新密钥签名的更新。
 
 标签格式错误或任一版本不一致时，工作流会失败且不会创建 Release。
 
