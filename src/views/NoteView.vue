@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useNoteStore } from "../stores/note";
 
 const store = useNoteStore();
@@ -10,7 +10,9 @@ const title = ref("");
 const content = ref("");
 const tagsText = ref("");
 const status = ref("");
+const dirty = ref(false);
 let timer: number | undefined;
+let applyingRemote = false;
 
 const shown = computed(() => store.notes.filter((note) => {
   const queryValue = query.value.toLowerCase();
@@ -22,14 +24,20 @@ const allTags = computed(() => [...new Set(store.notes.flatMap((note) => note.ta
 
 onMounted(() => store.init());
 
+async function applyNote(note: { title: string; content: string; tags: string[] }) {
+  applyingRemote = true;
+  title.value = note.title;
+  content.value = note.content;
+  tagsText.value = note.tags.join(", ");
+  dirty.value = false;
+  await nextTick();
+  applyingRemote = false;
+}
+
 function choose(id: string) {
   selectedId.value = id;
   const note = store.notes.find((value) => value.id === id);
-  if (note) {
-    title.value = note.title;
-    content.value = note.content;
-    tagsText.value = note.tags.join(", ");
-  }
+  if (note) void applyNote(note);
 }
 
 async function add() {
@@ -38,14 +46,24 @@ async function add() {
 }
 
 async function save() {
-  if (!selectedId.value) return;
+  if (!selectedId.value || applyingRemote) return;
+  const snapshot = {
+    title: title.value || "未命名",
+    content: content.value,
+    tags: tagsText.value.split(/[,，]/).map((value) => value.trim()).filter(Boolean),
+  };
+  const tagsSnapshot = snapshot.tags.join(", ");
   status.value = "保存中…";
   try {
-    await store.update(selectedId.value, {
-      title: title.value || "未命名",
-      content: content.value,
-      tags: tagsText.value.split(/[,，]/).map((value) => value.trim()).filter(Boolean),
-    });
+    await store.update(selectedId.value, snapshot);
+    if (
+      (title.value || "未命名") === snapshot.title &&
+      content.value === snapshot.content &&
+      tagsText.value.split(/[,，]/).map((value) => value.trim()).filter(Boolean).join(", ") ===
+        tagsSnapshot
+    ) {
+      dirty.value = false;
+    }
     status.value = "已保存";
   } catch (error) {
     status.value = String(error);
@@ -53,9 +71,29 @@ async function save() {
 }
 
 watch([title, content, tagsText], () => {
+  if (applyingRemote || !selectedId.value) return;
+  dirty.value = true;
   clearTimeout(timer);
   timer = window.setTimeout(save, 500);
 });
+
+watch(
+  () => store.notes,
+  () => {
+    if (!selectedId.value || dirty.value || applyingRemote) return;
+    const note = store.notes.find((value) => value.id === selectedId.value);
+    if (!note) return;
+    if (
+      note.title === title.value &&
+      note.content === content.value &&
+      note.tags.join(", ") === tagsText.value
+    ) {
+      return;
+    }
+    void applyNote(note);
+  },
+  { deep: true }
+);
 </script>
 
 <template>

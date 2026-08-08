@@ -11,11 +11,15 @@ const status = ref("");
 const loadError = ref("");
 let timer: number | undefined;
 let saveSeq = 0;
+let hydrated = false;
+let savePromise: Promise<void> | null = null;
 
 async function load() {
   loadError.value = "";
+  hydrated = false;
   try {
     note.value = await api.get(id);
+    hydrated = true;
   } catch (err) {
     loadError.value = String(err);
   }
@@ -26,36 +30,62 @@ onMounted(async () => {
 });
 
 watch(
-  note,
+  () =>
+    note.value
+      ? [
+          note.value.title,
+          note.value.content,
+          note.value.collapsed,
+          note.value.alwaysOnTop,
+        ]
+      : null,
   () => {
-    if (!note.value) return;
+    if (!hydrated || !note.value) return;
     clearTimeout(timer);
-    timer = window.setTimeout(save, 500);
-  },
-  { deep: true }
+    timer = window.setTimeout(() => {
+      void save();
+    }, 500);
+  }
 );
 
 async function save() {
   if (!note.value) return;
   const seq = ++saveSeq;
   const snapshot = {
-    title: note.value.title,
+    title: String(note.value.title ?? "").trim() || "未命名",
     content: note.value.content,
     collapsed: note.value.collapsed,
     alwaysOnTop: note.value.alwaysOnTop,
   };
   status.value = "保存中…";
-  try {
-    await api.update(id, snapshot);
-    if (seq === saveSeq) status.value = "已保存";
-  } catch (err) {
-    if (seq === saveSeq) status.value = String(err);
-  }
+  const run = (async () => {
+    try {
+      await api.update(id, snapshot);
+      if (seq === saveSeq) status.value = "已保存";
+    } catch (err) {
+      if (seq === saveSeq) status.value = String(err);
+    }
+  })();
+  savePromise = run;
+  await run;
+  if (savePromise === run) savePromise = null;
 }
 
-onBeforeUnmount(() => clearTimeout(timer));
+async function flushSave() {
+  clearTimeout(timer);
+  timer = undefined;
+  if (note.value) await save();
+  else if (savePromise) await savePromise;
+}
+
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  timer = undefined;
+  if (hydrated && note.value) void save();
+});
 
 async function dock() {
+  await flushSave();
   await api.dock(id);
 }
 

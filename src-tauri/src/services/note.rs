@@ -2,7 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
 use crate::models::{Note, WindowBounds};
 use crate::storage::Storage;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Default, serde::Deserialize)]
@@ -22,10 +22,16 @@ pub struct NotePatch {
 
 pub struct NoteService {
     storage: Arc<Storage>,
+    /// Serializes read-modify-write so concurrent content and bounds updates
+    /// cannot overwrite each other with stale whole-note snapshots.
+    write_lock: Mutex<()>,
 }
 impl NoteService {
     pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            write_lock: Mutex::new(()),
+        }
     }
     pub fn list(&self, include_deleted: bool) -> AppResult<Vec<Note>> {
         let mut notes: Vec<Note> = self.storage.list_json("notes")?;
@@ -49,6 +55,10 @@ impl NoteService {
         if title.trim().is_empty() {
             return Err(AppError::InvalidInput("title must not be empty".into()));
         }
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Internal("note write lock poisoned".into()))?;
         let now = now_rfc3339();
         let note = Note {
             schema_version: 1,
@@ -70,6 +80,10 @@ impl NoteService {
         Ok(note)
     }
     pub fn update(&self, id: &str, patch: NotePatch) -> AppResult<Note> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Internal("note write lock poisoned".into()))?;
         let mut note = self.get(id)?;
         if let Some(v) = patch.title {
             if v.trim().is_empty() {
@@ -116,9 +130,85 @@ impl NoteService {
         Ok(note)
     }
     pub fn permanent_delete(&self, id: &str) -> AppResult<()> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Internal("note write lock poisoned".into()))?;
         self.storage.delete_entity("notes", id)
     }
     fn save(&self, note: &Note) -> AppResult<()> {
         self.storage.save_entity("notes", &note.id, note)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::WindowBounds;
+    use std::sync::Arc;
+
+    fn temp_service(tag: &str) -> (std::path::PathBuf, NoteService) {
+        let dir =
+            std::env::temp_dir().join(format!("maydolist-note-{}-{}", tag, uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        (dir, NoteService::new(storage))
+    }
+
+    #[test]
+    fn concurrent_content_and_bounds_updates_preserve_both() {
+        let (dir, service) = temp_service("rmw");
+        let service = Arc::new(service);
+        let note = service.create("title".into(), "initial".into()).unwrap();
+        let id = note.id.clone();
+
+        let mut handles = Vec::new();
+        for i in 0..40 {
+            let service = service.clone();
+            let id = id.clone();
+            handles.push(std::thread::spawn(move || {
+                if i % 2 == 0 {
+                    service
+                        .update(
+                            &id,
+                            NotePatch {
+                                content: Some(format!("content-{i}")),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                } else {
+                    service
+                        .update(
+                            &id,
+                            NotePatch {
+                                window_bounds: Some(WindowBounds {
+                                    x: i as f64,
+                                    y: i as f64,
+                                    width: 360.0,
+                                    height: 280.0,
+                                }),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let final_note = service.get(&id).unwrap();
+        assert!(
+            final_note.content.starts_with("content-"),
+            "content lost to bounds RMW: {}",
+            final_note.content
+        );
+        assert!(
+            final_note.window_bounds.is_some(),
+            "window_bounds lost to content RMW"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
