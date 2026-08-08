@@ -93,6 +93,7 @@ pub fn run() {
             commands::trash::trash_list,
             commands::trash::trash_restore,
             commands::trash::trash_delete_permanently,
+            commands::trash::trash_clear,
             commands::github::github_status,
             commands::github::github_watchlist,
             commands::github::github_watch_add,
