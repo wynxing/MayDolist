@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { call } from "../api";
 import { useSettingsStore } from "../stores/settings";
 import { useUpdateStore } from "../stores/update";
@@ -22,6 +22,13 @@ const trashGroups = [
   { kind: "todoItem", key: "todoItems", label: "待办事项" },
   { kind: "note", key: "notes", label: "便签" },
 ] as const;
+
+const trashCount = computed(
+  () =>
+    (trash.value?.todoLists?.length ?? 0) +
+    (trash.value?.todoItems?.length ?? 0) +
+    (trash.value?.notes?.length ?? 0)
+);
 
 onMounted(async () => {
   await settings.init();
@@ -60,6 +67,20 @@ async function migrate() {
 async function action(kind: string, id: string, command: string) {
   await call(command, { kind, id });
   trash.value = await call<Trash>("trash_list");
+}
+
+async function permanentlyDelete(kind: string, id: string, title: string) {
+  if (!window.confirm(`永久删除“${title}”？此操作不可撤销。`)) return;
+  await action(kind, id, "trash_delete_permanently");
+}
+
+async function clearTrash() {
+  const count = trashCount.value;
+  if (!count) return;
+  if (!window.confirm(`清空回收站中的 ${count} 项？此操作不可撤销。`)) return;
+  await call("trash_clear");
+  trash.value = await call<Trash>("trash_list");
+  message.value = "回收站已清空";
 }
 </script>
 
@@ -213,7 +234,16 @@ async function action(kind: string, id: string, command: string) {
     </div>
 
     <div class="settings-section">
-      <h3>回收站</h3>
+      <div class="trash-heading">
+        <h3>回收站</h3>
+        <button
+          v-if="trashCount > 0"
+          class="btn danger compact"
+          @click="clearTrash"
+        >
+          清空回收站 ({{ trashCount }})
+        </button>
+      </div>
       <div class="trash-list">
         <template v-for="group in trashGroups" :key="group.kind">
           <div
@@ -224,10 +254,10 @@ async function action(kind: string, id: string, command: string) {
             <span class="trash-kind">{{ group.label }}</span>
             <span class="trash-title">{{ row.title }}</span>
             <div class="trash-actions">
-              <button class="btn" @click="action(group.kind, row.id, 'trash_restore')">恢复</button>
+              <button class="btn compact" @click="action(group.kind, row.id, 'trash_restore')">恢复</button>
               <button
-                class="btn danger"
-                @click="action(group.kind, row.id, 'trash_delete_permanently')"
+                class="btn danger compact"
+                @click="permanentlyDelete(group.kind, row.id, row.title)"
               >
                 永久删除
               </button>
@@ -235,7 +265,7 @@ async function action(kind: string, id: string, command: string) {
           </div>
         </template>
         <p
-          v-if="trash && trashGroups.every((group) => !(trash?.[group.key]?.length))"
+          v-if="trash && trashCount === 0"
           class="settings-empty"
         >
           回收站为空

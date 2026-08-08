@@ -77,3 +77,22 @@ pub fn trash_delete_permanently(
     };
     emit_entity_changed(&app, &kind, &id, "purged")
 }
+
+#[tauri::command]
+pub fn trash_clear(state: State<'_, AppState>, app: AppHandle) -> AppResult<()> {
+    let trash = trash_list(state.clone())?;
+    // Items first so list-file deletes do not leave dangling item purges.
+    for item in &trash.todo_items {
+        state.services.todo.permanent_delete("todoItem", &item.id)?;
+        emit_entity_changed(&app, "todoItem", &item.id, "purged")?;
+    }
+    for list in &trash.todo_lists {
+        state.services.todo.permanent_delete("todoList", &list.id)?;
+        emit_entity_changed(&app, "todoList", &list.id, "purged")?;
+    }
+    for note in &trash.notes {
+        state.services.note.permanent_delete(&note.id)?;
+        emit_entity_changed(&app, "note", &note.id, "purged")?;
+    }
+    Ok(())
+}

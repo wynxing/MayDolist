@@ -213,7 +213,7 @@ select:focus-visible {
 
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex: 1;
 }
 
@@ -364,7 +364,7 @@ textarea.input {
 
 .toolbar {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   margin-bottom: 12px;
 }
@@ -507,7 +507,7 @@ textarea.input {
 .todo-item-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -520,13 +520,13 @@ textarea.input {
 }
 
 .btn.compact {
-  padding: 4px 7px;
+  padding: 5px 9px;
   font-size: 11px;
 }
 
 .todo-add-row {
   padding: 8px;
-  margin-bottom: 7px;
+  margin-bottom: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.025);
@@ -549,7 +549,7 @@ textarea.input {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 
 .todo-item {
@@ -557,7 +557,7 @@ textarea.input {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 8px;
+  padding: 7px 8px;
   border: 1px solid transparent;
   border-radius: 9px;
   cursor: grab;
@@ -611,7 +611,7 @@ textarea.input {
 }
 
 .text-action {
-  padding: 4px 6px;
+  padding: 5px 8px;
   cursor: pointer;
 }
 
@@ -630,8 +630,8 @@ textarea.input {
 }
 
 .move-select {
-  max-width: 92px;
-  padding: 4px 3px;
+  max-width: 110px;
+  padding: 4px 6px;
   cursor: pointer;
 }
 
@@ -698,8 +698,10 @@ textarea.input {
 
   .todo-item-actions {
     opacity: 1;
-    max-width: 44%;
-    overflow-x: auto;
+    max-width: none;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 }
 
@@ -724,7 +726,7 @@ textarea.input {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   overflow: auto;
   flex: 1;
 }
@@ -737,7 +739,7 @@ textarea.input {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .select-list > li:hover {
@@ -762,7 +764,7 @@ textarea.input {
 
 .tags-inline {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -791,7 +793,7 @@ textarea.input {
 .editor-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
@@ -806,6 +808,7 @@ textarea.input {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 12px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -882,7 +885,12 @@ textarea.input {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
   margin-bottom: 8px;
+}
+
+.snapshot-header .btn {
+  flex-shrink: 0;
 }
 
 .snapshot-header h3 {
@@ -1151,13 +1159,13 @@ textarea.input {
 }
 
 .update-actions {
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .settings-migrate {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .settings-migrate .input {
@@ -1165,17 +1173,33 @@ textarea.input {
   min-width: 0;
 }
 
+.settings-migrate .btn {
+  flex-shrink: 0;
+}
+
+.trash-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.trash-heading h3 {
+  margin: 0;
+}
+
 .trash-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 10px;
 }
 
 .trash-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 10px 12px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -1183,7 +1207,8 @@ textarea.input {
 
 .trash-kind {
   flex: none;
-  width: 62px;
+  min-width: 4.5em;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 11px;
 }
@@ -1198,7 +1223,8 @@ textarea.input {
 
 .trash-actions {
   display: flex;
-  gap: 6px;
+  flex-shrink: 0;
+  gap: 10px;
 }
 
 .settings-empty {
@@ -1221,12 +1247,12 @@ textarea.input {
     align-items: flex-start;
     flex-direction: column;
     justify-content: center;
-    gap: 5px;
+    gap: 10px;
   }
 
   .settings-row {
     grid-template-columns: 1fr;
-    gap: 6px;
+    gap: 10px;
   }
 
   .settings-actions .btn {
@@ -1243,13 +1269,15 @@ textarea.input {
     flex-basis: 100%;
   }
 
-  .trash-title {
-    flex-basis: calc(100% - 76px);
+  .trash-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   .trash-actions {
     width: 100%;
     justify-content: flex-end;
+    gap: 10px;
   }
 }
 .filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); flex-wrap: wrap; }
@@ -1263,6 +1291,7 @@ textarea.input {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1294,7 +1323,7 @@ textarea.input {
 .gh-item-row {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 8px;
 }
 .gh-item-row.dimmed .gh-link {
   opacity: 0.55;
@@ -1302,7 +1331,7 @@ textarea.input {
 .gh-ignore {
   flex: none;
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   color: var(--muted);
 }
 .gh-ignore:hover {
@@ -1324,7 +1353,7 @@ textarea.input {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 0 8px 8px;
+  padding: 0 10px 10px;
   background-image: var(--glass-tint);
   background-color: var(--bg);
   border: 1px solid var(--border);
@@ -1335,14 +1364,23 @@ textarea.input {
   transition: background-color 140ms ease, box-shadow 180ms ease;
 }
 .floating .window-drag {
-  margin: 0 -8px 6px;
+  margin: 0 -10px 8px;
   border-radius: 11px 11px 0 0;
 }
-.floating header { display: flex; align-items: center; height: 30px; gap: 6px; border-bottom: 1px solid transparent; }
-.floating-title { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 6px; outline: 0; padding: 3px 5px; background: transparent; color: var(--text); font-weight: 600; }
+.floating header { display: flex; align-items: center; height: 36px; gap: 8px; border-bottom: 1px solid transparent; }
+.floating-title { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 6px; outline: 0; padding: 4px 8px; background: transparent; color: var(--text); font-weight: 600; }
 .floating-title:hover { background: var(--card); }
 .floating-title:focus { border-color: var(--accent); background: var(--field); }
-.floating header button { border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.floating header button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
 .floating header button:hover { color: var(--text); background: var(--card-hover); }
 .floating textarea { flex: 1; min-height: 0; margin-top: 6px; border-color: var(--border); background: var(--field); color: var(--text); }
 .floating textarea::placeholder { color: var(--muted); }
