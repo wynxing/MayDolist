@@ -1,4 +1,5 @@
 pub mod config;
+pub mod focus;
 pub mod github;
 pub mod note;
 pub mod quick_capture;

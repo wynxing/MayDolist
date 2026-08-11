@@ -6,14 +6,16 @@ import { useSettingsStore } from "../stores/settings";
 
 const settings = useSettingsStore();
 const buildId = __BUILD_ID__;
-const active = ref("todo");
+const active = ref("focus");
 const tabs = [
+  ["focus", "今日"],
   ["todo", "待办"],
   ["note", "便签"],
   ["github", "GitHub"],
   ["settings", "设置"],
 ];
 
+const FocusView = defineAsyncComponent(() => import("./FocusView.vue"));
 const TodoView = defineAsyncComponent(() => import("./TodoView.vue"));
 const NoteView = defineAsyncComponent(() => import("./NoteView.vue"));
 const GithubView = defineAsyncComponent(() => import("./GithubView.vue"));
@@ -21,6 +23,8 @@ const SettingsView = defineAsyncComponent(() => import("./SettingsView.vue"));
 
 const activeView = computed(() => {
   switch (active.value) {
+    case "focus":
+      return FocusView;
     case "note":
       return NoteView;
     case "github":
@@ -62,7 +66,7 @@ onMounted(async () => {
     </header>
     <main class="content">
       <KeepAlive>
-        <component :is="activeView" />
+        <component :is="activeView" @navigate="active = $event" />
       </KeepAlive>
     </main>
     <footer class="statusbar">

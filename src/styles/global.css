@@ -1444,3 +1444,218 @@ textarea.input {
   font-size: 12px;
   user-select: text;
 }
+
+/* Focus / today view (see views/FocusView.vue). */
+.focus-view {
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding-bottom: 12px;
+}
+
+.focus-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 2px 2px 14px;
+}
+
+.focus-topbar h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.focus-topbar p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.focus-loading,
+.focus-refreshing,
+.focus-all-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 18px;
+  text-align: center;
+}
+
+.focus-refreshing {
+  padding: 0 0 10px;
+}
+
+.focus-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.focus-section {
+  border-radius: 14px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.focus-section-header {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.focus-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.focus-section-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.focus-section-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.focus-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.focus-item {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+}
+
+.focus-item:hover {
+  background: var(--card-hover);
+}
+
+.focus-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  flex: none;
+  cursor: pointer;
+  margin: 0;
+}
+
+.focus-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.focus-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  align-items: stretch;
+}
+
+.focus-item-main:hover {
+  background: var(--card);
+}
+
+.focus-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.focus-item-preview,
+.focus-item-meta,
+.focus-item-source {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-item-meta.inbox {
+  color: var(--accent);
+}
+
+.focus-badge {
+  display: inline-block;
+  min-width: 26px;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  text-align: center;
+}
+
+.focus-badge.issue {
+  background: rgba(245, 158, 11, 0.16);
+  color: #f5b044;
+}
+
+:root[data-theme="light"] .focus-badge.issue {
+  color: #9a5b00;
+}
+
+.focus-empty,
+.focus-more {
+  margin: 6px 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.focus-cache-hint {
+  margin: 6px 2px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .focus-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .focus-topbar .btn {
+    align-self: flex-start;
+  }
+
+  .focus-sections {
+    grid-template-columns: 1fr;
+  }
+}

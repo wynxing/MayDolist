@@ -61,7 +61,7 @@ MayDolist 是一款面向 Windows 的「收纳式」桌面便签应用，平时�
 ```mermaid
 flowchart TB
     subgraph UI["Vue 3 + TS 前端层"]
-        Main["主面板（Todo / 便签 / GitHub / 设置）"]
+        Main["主面板（Focus / Todo / 便签 / GitHub / 设置）"]
         Note["悬浮便签窗（可多开）"]
         Quick["快速收集窗（轻量输入）"]
     end
@@ -137,6 +137,7 @@ sequenceDiagram
 | `commands` | 暴露给前端的 Tauri Commands，做参数校验与错误转换 | 业务规则 |
 | `storage` | 数据目录解析、JSON 序列化 / 反序列化、原子写盘 | GitHub 数据获取 |
 | `github` | gh 子进程调用、响应解析、缓存读写、定时刷新 | UI 展示 |
+| `focus` | 跨领域只读投影：并行加载、局部失败隔离、排序 / 去重 / 截断 | 任何写操作 |
 | `models` | serde 数据模型（config / note / todo / github） | 任何 IO |
 | `events` | 跨窗口事件广播（数据变更、窗口状态） | 业务逻辑 |
 
@@ -144,7 +145,7 @@ sequenceDiagram
 
 | 模块 | 职责 |
 | --- | --- |
-| `views` | 主面板视图（Todo / 便签 / GitHub / 设置）、悬浮便签窗与快速收集窗 |
+| `views` | 主面板视图（Focus / Todo / 便签 / GitHub / 设置）、悬浮便签窗与快速收集窗 |
 | `stores` | Pinia 状态管理，维护 UI 状态与缓存数据 |
 | `api` | `invoke` 封装层，前端唯一的数据访问入口 |
 | `components` | 可复用 UI 组件（卡片、列表、标签、窗口控制等） |
@@ -235,6 +236,18 @@ MayDolist/
 - 手动刷新 + 定时刷新（默认 30 分钟，可配置）。
 - 刷新失败或离线时，展示上次本地快照并提示「刷新失败」。
 - 点击条目在系统浏览器打开对应页面。
+
+### 6.6 Focus 今日视图
+
+- Focus 是主面板默认打开页，只做**只读投影**，不改变 Todo / 便签 / GitHub 任何文件格式，也不写回领域存储。
+- 并行加载三个领域（`FocusService::overview` 内线程并行），任一领域失败只产生该区块的局部错误，不阻塞其余区块。
+- 纳入规则：
+  - 待办：未完成且未软删除；「收件箱」（`kind=inbox`）优先，再按清单 / 条目 sort order，上限 50。
+  - 便签：置顶全部（按更新时间倒序）+ 最近更新的未置顶便签（默认 5 条），按 id 去重，上限 8。
+  - GitHub：只读本地快照中 `state=open` 的 Issue / PR（不发网络请求），手动钉住优先、按更新时间倒序，上限 30；未登录 / 离线 / 上次刷新失败时标记 `offlineCache` 并展示缓存。
+- 每个聚合项提供最小动作：完成 Todo、打开来源（GitHub 走系统浏览器）、进入对应模块（便签可携带目标 id 直接打开编辑，保留悬浮操作）。
+- Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
+- MVP 不引入日历与截止日期；「今日」仅基于未完成、置顶、最近更新等现有字段，截止日期另行演进。
 
 ## 7. 并发与一致性
 
