@@ -9,7 +9,7 @@
 
 | Issue | 标题 | 依赖 | 状态 | 分支 | PR | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 进行中 | - | - | 最后收尾；activeThreadId: `019ff329-5061-7e60-bb6b-4fe744ebc3c9`（worktree） |
+| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | ✅ 已完成 | `codex/issue-16-rfc-action-inbox` | [#27](https://github.com/wynxing/MayDolist/pull/27) | CI 绿 + 已合并 + issue 自动关闭 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
@@ -84,6 +84,31 @@
 - [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 76 passed）
 - [x] PR [#26](https://github.com/wynxing/MayDolist/pull/26) 合并（merge commit `c614c9e`），issue #21 已自动关闭
 
+## 验收清单（#16 RFC：演进为开发者行动收件箱）
+
+### RFC 分段清单（5 项全部实现并合并）
+
+- [x] 快速收集与 Inbox —— #17 → PR [#22](https://github.com/wynxing/MayDolist/pull/22)（merge `ddfd778`）
+- [x] 今日 / Focus 统一视图 —— #18 → PR [#23](https://github.com/wynxing/MayDolist/pull/23)（merge `8259291`）
+- [x] GitHub 条目转 Todo 与来源关联 —— #19 → PR [#24](https://github.com/wynxing/MayDolist/pull/24)（merge `f3d4ff2`）
+- [x] GitHub 可行动信号 —— #20 → PR [#25](https://github.com/wynxing/MayDolist/pull/25)（merge `9d127fa`）
+- [x] 本地备份、导入与恢复 —— #21 → PR [#26](https://github.com/wynxing/MayDolist/pull/26)（merge `c614c9e`）
+
+### RFC 总体验收标准（6 条逐项核对）
+
+- [x] 用户可以在不打开主面板的情况下快速创建 Todo 或便签 —— 快速收集窗（`Ctrl+Alt+Space` / 托盘「快速收集」），`todo:` / `note:` 前缀，`quick_capture_submit` 单测覆盖
+- [x] 用户打开主面板后能看到按行动优先级聚合的内容 —— Focus / 今日默认页聚合收件箱优先 Todo、置顶 / 最近便签、可行动 GitHub 条目（`FocusService::overview` 并行加载 + 局部失败隔离）
+- [x] GitHub PR / Issue 可以转成带来源的 Todo，并能返回 GitHub 页面 —— `todo_create_from_github` + `TodoSource`（type / repo / number / url）+「打开来源」浏览器跳转
+- [x] GitHub 刷新结果可以表达「需要我行动」的状态 —— 稳定 `ActionSignal` 枚举（needsAction / needsReview / ciFailed / stale / draft）+ 徽标 + 按信号过滤
+- [x] 本地数据可以导出、导入，并在异常情况下恢复 —— export / import / backup service：staging 校验 → 自动备份 → 原子交换 / 回滚
+- [x] 现有 Todo、便签、GitHub 追踪、悬浮窗口、回收站和更新能力不回归 —— 领域格式与字段向后兼容（serde 默认值），全量校验全绿
+
+### 回归与校验
+
+- 本轮仅文档收尾：完善 architecture.md（产品定位 / 设计原则 / 模块关系 / 行动闭环 / 非目标）与 README.md，未改动任何源码、模型或持久化字段，已实现模块行为不变。
+- 全量校验全绿：`pnpm check` ✅、`pnpm build` ✅、`cargo fmt --check` ✅、`cargo clippy --all-targets -D warnings` ✅、`cargo test`（76 passed）✅；PR #27 CI 3m7s 全绿（rebase 前 2m24s 亦全绿）。
+- PR [#27](https://github.com/wynxing/MayDolist/pull/27) squash 合并（merge commit `39ecbb1`），issue #16 已自动关闭。
+
 ## 交接记录
 
 ### 自动化编排启动（2026-08-11）
@@ -125,3 +150,10 @@
 
 - 同一时间窗口内有多个控制器 run 并发唤醒：15:22 run（019ff1a2）先创建 #16 线程 `019ff329-5061-7e60-bb6b-4fe744ebc3c9`（worktree `7e01`，分支 `codex/issue-16-rfc-action-inbox`）并回写 activeThreadId（提交 `9900b20`）；本 run 随后创建的重名线程 `019ff329-fb8f-76c1-8635-bd73172c7487`（worktree `1641`，分支 `codex/issue-16-rfc-inbox`）已按 tracker 去重规则通知停止，未推送任何内容。
 - 进行中：#16 由 `019ff329-5061` 线程执行，完成后全部 6 个 issue 收官（#17 已完成 + #18-#21 及 #16 均 ✅），自动化输出完成总结并暂停。
+
+### 轮次 6（#16，已完成）
+
+- 完成证据：PR [#27](https://github.com/wynxing/MayDolist/pull/27)（CI 3m7s 全绿，rebase 后重跑亦全绿）→ squash 合并（merge commit `39ecbb1`）→ issue #16 自动关闭（2026-08-12 07:50 +08）。
+- 收尾内容：RFC 分段清单 5 项逐项核对 ✅（#17-#21 → PR #22-#26）；总体验收标准 6 条逐条核对 ✅；回归确认（Todo / 便签 / GitHub 追踪 / 悬浮窗口 / 回收站 / 更新能力）无回归；完善 architecture.md 与 README.md（产品定位、模块关系、闭环流程「捕获 → 判断下一步 → 执行 → 回到来源」、非目标）；无新增持久化字段、无破坏性变更。
+- 全量校验全绿：pnpm check / pnpm build / cargo fmt --check / cargo clippy --all-targets -D warnings / cargo test（76 passed）。
+- **全量编排完成**：6 个 issue（#16-#21）全部 ✅，无下一轮 issue；巡检控制器不再创建新轮次，仅保留兜底巡检。
