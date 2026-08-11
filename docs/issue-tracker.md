@@ -12,8 +12,8 @@
 | #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
-| #19 | GitHub 条目转 Todo | #17/#18 | 进行中 | - | - | activeThreadId: `019ff151-a86c-70b0-9ce6-96f546f7ab84`（worktree） |
-| #20 | GitHub 可行动信号 | #18/#19 | 待做 | - | - | |
+| #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
+| #20 | GitHub 可行动信号 | #18/#19 | 进行中 | - | - | activeThreadId: `019ff170-2ab6-7201-a181-e2148d8cd8a2`（worktree） |
 | #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
 
 ## 验收清单（#17 快速收集入口与 Inbox）
@@ -43,6 +43,19 @@
 - [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 41 passed）
 - [x] PR [#23](https://github.com/wynxing/MayDolist/pull/23) 合并（merge commit `8259291`），issue #18 已自动关闭
 
+## 验收清单（#19 GitHub 条目转 Todo）
+
+- [x] Rust Todo 模型与 TypeScript 类型新增向后兼容 `TodoSource`（JSON 字段 `type` / `repo` / `number` / `url`；无来源条目不落盘该字段）
+- [x] 旧数据迁移：source 可选 + serde 默认值，旧 Todo 读取为无来源
+- [x] `todo_create_item` command / service / API 支持可选 source；新增 `todo_create_from_github` 命令（默认进入 Inbox，复用 `ensure_inbox` 幂等逻辑，默认标题「仓库 #编号 标题」）
+- [x] GitHub 视图 PR / Issue 行新增「转为 Todo」：保存中 / 成功 / 失败反馈，防快速重复点击；同一条目允许重复转换
+- [x] Todo 视图与 Focus 视图显示来源徽标并提供「打开来源」（仅 http / https，前后端双重校验）
+- [x] 不改变 GitHub 缓存、认证与网络状态；前端不直接写文件（来源经 Rust command / service 持久化）
+- [x] 单元测试：source 序列化、旧数据迁移、URL 校验、GitHub→Todo service 层、Focus 投影（cargo test 48 passed）
+- [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 48 passed）
+- [x] 文档更新（architecture.md 数据布局与跨模块引用 + README.md）
+- [x] PR [#24](https://github.com/wynxing/MayDolist/pull/24) 合并（merge commit `f3d4ff2`），issue #19 已自动关闭
+
 ## 交接记录
 
 ### 自动化编排启动（2026-08-11）
@@ -61,3 +74,9 @@
 
 - 完成证据：PR #23（CI 3m22s 全绿）→ squash 合并（merge commit `8259291`）→ issue #18 自动关闭。
 - 下一轮：#19 GitHub 条目转 Todo（依赖 #17/#18），线程已即时创建（threadId `019ff151-a86c-70b0-9ce6-96f546f7ab84`，worktree `C:\Users\wynn\.codex\worktrees\2e60\MayDolist`），开场指令见本轮交接摘要。
+
+### 轮次 3（#19，已完成）
+
+- 完成证据：PR #24（CI 3m43s + rebase 后 2m48s 全绿）→ squash 合并（merge commit `f3d4ff2`）→ issue #19 自动关闭。
+- 实现要点：Todo 可选 `source`（`type`/`repo`/`number`/`url`，serde 默认值向后兼容）；`todo_create_from_github` 命令默认进 Inbox（复用 `ensure_inbox`）；GitHub 行「转为 Todo」带保存中/成功/失败反馈；Todo 与 Focus 视图来源徽标 + 「打开来源」（仅 http/https）；不触碰 GitHub 缓存/认证/网络；前端不直接写文件。cargo test 48 passed。
+- 下一轮：#20 GitHub 可行动信号（依赖 #18/#19），线程已即时创建（threadId `019ff170-2ab6-7201-a181-e2148d8cd8a2`，worktree `C:\Users\wynn\.codex\worktrees\3bc6\MayDolist`），开场指令见本轮交接摘要。
