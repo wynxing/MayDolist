@@ -165,8 +165,8 @@ MayDolist/
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；系统列表用 kind 标记
 └── github/
-    ├── watchlist.json       # 追踪仓库：filters / collapsed / ignored / pinned
-    └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt（可重建）
+    ├── watchlist.json       # 追踪仓库：filters / signalFilters / collapsed / ignored / pinned
+    └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt / signalsComputedAt（可重建）
 ```
 
 ### 5.2 实体规则
@@ -176,6 +176,8 @@ MayDolist/
 - `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
 - Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）；旧数据无该字段时按无来源读取，序列化时缺省字段不落盘，向后兼容。
 - `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
+- 仓库快照的每个条目含可选信号字段（`assignees` / `reviewers` / `headSha` / `checksState` / `signals`），快照级 `signalsComputedAt` 记录信号计算时间；旧快照缺字段时按空值读取，刷新成功后自动补全（向后兼容，不需要迁移）。
+- 行动信号是稳定枚举（`needsAction` / `needsReview` / `ciFailed` / `stale` / `draft`），UI 只消费该枚举，不依赖 GitHub 原始字符串；`stale` 依据 `config.json` 的 `githubStaleDays`（默认 14 天，0 关闭）在读取快照时实时计算。
 - `config.json` 为单例配置，不采用实体文件形式。
 - 系统列表（如快速收集的「收件箱」）通过 `kind` 字段标记（`kind=inbox`）；旧数据无该字段时按普通列表读取，兼容不破坏。
 
@@ -233,11 +235,13 @@ MayDolist/
 
 - 按项目（仓库）分组，可增删追踪仓库；仓库面板支持折叠 / 展开，并持久化折叠状态与条目摘要（如 `3 PR · 2 Issue`）。
 - 默认只展示过滤器命中的 open Issue / PR（「我的 / 被提及 / 被分配 / 参与」）；可选开启「全部 PR」以拉取仓库全部未合并 PR。
+- 行动信号：每条 open 条目计算稳定信号并显示徽标——「需要我处理」（被分配 / 被提及 / 参与 / 手动关注）、「需要 Review」（当前用户被请求 review 的 PR）、「CI 失败」（失败 / 错误检查）、「长期未更新」（超过 `githubStaleDays` 天）、「Draft」（草稿 PR，仅展示不计入行动）。每条目同时显示最后更新时间和本地快照 / 信号计算时间。
+- 行动信号过滤：每个仓库可选按信号过滤（多选，空 = 不过滤，保持旧行为）；「Draft」不提供过滤选项，避免把信息性状态变成行动列表。
 - 支持忽略条目：忽略名单写在 `github/watchlist.json`（非可重建 cache），刷新后仍保持隐藏；可用 `#xx` 手动加回。
 - 支持按仓库手动钉住：在展开的仓库内输入 `#123`，经 `gh api repos/{repo}/issues/{n}` 拉取后写入 `pinned`，与自动结果合并展示（标记「手动」）。
-- 数据经 `gh api`（`--paginate`）读取 REST 接口获取。
-- 手动刷新 + 定时刷新（默认 30 分钟，可配置）。
-- 刷新失败或离线时，展示上次本地快照并提示「刷新失败」。
+- 数据经 `gh api`（`--paginate`）读取 REST 接口获取；open PR 补充 `pulls/{n}` 详情（requested reviewers / head SHA）与 `commits/{sha}/status` / `check-runs` 检查状态。同一 PR 的 `updated_at` 未变化时复用缓存详情，避免每次刷新重复打 API（rate-limit 友好）。
+- 手动刷新（全部或单仓库）+ 定时刷新（默认 30 分钟，可配置）。全部刷新按仓库**串行**执行（单进程内逐个 gh 调用），并用 `refreshing` 集合防止同一仓库并发重复刷新；单仓库失败只在该仓库快照上记录 `lastError` 并保留旧缓存，不清空其他仓库数据。
+- 刷新失败、认证失败、网络失败或 API 缺字段时降级：保留上次本地快照继续展示（缺信号字段的旧快照标注「旧缓存」，刷新后自动补全）。
 - 点击条目在系统浏览器打开对应页面。
 - PR / Issue 行提供「转为 Todo」：调用 Todo 领域命令（`todo_create_from_github`），默认标题为「仓库 #编号 标题」，条目默认进入收件箱（复用 `ensure_inbox` 幂等逻辑），写入带来源的 Todo；同一 GitHub 条目允许重复转换（去重留待后续版本）。该操作只触碰 Todo 域，不改变 GitHub 缓存、认证与网络状态。
 
@@ -248,7 +252,7 @@ MayDolist/
 - 纳入规则：
   - 待办：未完成且未软删除；「收件箱」（`kind=inbox`）优先，再按清单 / 条目 sort order，上限 50。
   - 便签：置顶全部（按更新时间倒序）+ 最近更新的未置顶便签（默认 5 条），按 id 去重，上限 8。
-  - GitHub：只读本地快照中 `state=open` 的 Issue / PR（不发网络请求），手动钉住优先、按更新时间倒序，上限 30；未登录 / 离线 / 上次刷新失败时标记 `offlineCache` 并展示缓存。
+  - GitHub：只读本地快照中 `state=open` 且携带**可行动信号**（需要我处理 / 需要 Review / CI 失败 / 长期未更新）的 Issue / PR（不发网络请求；仅 Draft 或无关的 open 条目不进入 Focus），手动钉住优先、按更新时间倒序，上限 30；未登录 / 离线 / 上次刷新失败时标记 `offlineCache` 并展示缓存。
 - 每个聚合项提供最小动作：完成 Todo、打开来源（GitHub 走系统浏览器）、进入对应模块（便签可携带目标 id 直接打开编辑，保留悬浮操作）。
 - Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
 - MVP 不引入日历与截止日期；「今日」仅基于未完成、置顶、最近更新等现有字段，截止日期另行演进。
@@ -258,12 +262,14 @@ MayDolist/
 - **单写者**：所有文件写入由 Rust 单进程串行化（Mutex），避免多窗口并发写冲突。
 - **先写盘后广播**：写盘成功后才广播数据变更事件，前端收到的状态与磁盘一致。
 - **缓存与实体分离**：GitHub 缓存（`github/cache/`）与用户实体数据（`notes/`、`todos/`）分离，缓存可安全重建。
+- **刷新去重与串行化**：`GithubService` 内 `refreshing` 集合保证同一仓库同一时刻只有一个刷新任务；`refresh_all` 按仓库串行执行，避免进程数量膨胀与 API rate limit 叠加。
 - **多窗口同步**：通过 Tauri 事件广播数据变更，所有窗口（主面板与悬浮便签）保持同一数据视图。
 
 ## 8. 安全与权限
 
 - **Tauri capabilities 最小化授权**：只授予前端必需能力，前端无文件系统访问权限。
 - **GitHub 凭据**：仅由 gh CLI 持有，应用不读取、不存储 token。
+- **GitHub 权限面**：应用只调用 gh CLI 的只读接口（`user`、`search/issues`、`repos/{repo}/issues`、`pulls`、`commits/{sha}/status`、`check-runs`），不创建 / 合并 / 评论；所需 scope 由 gh CLI 登录时授予（经典 token 需 `repo` 或公开仓库只读权限），应用不向 GitHub 发起写操作。
 - **外链一律系统浏览器打开**：不内嵌浏览器，降低凭据与 XSS 暴露面。
 - **默认 CSP**：为前端页面设置合理 CSP，禁止不安全的内联执行与外部资源加载。
 

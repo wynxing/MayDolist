@@ -54,6 +54,18 @@ pub fn github_watch_filters(
 }
 
 #[tauri::command]
+pub fn github_watch_signal_filters(
+    state: State<'_, AppState>,
+    full_name: String,
+    filters: Vec<String>,
+) -> AppResult<Vec<RepoWatch>> {
+    state
+        .services
+        .github
+        .set_signal_filters(&full_name, filters)
+}
+
+#[tauri::command]
 pub fn github_watch_collapsed(
     state: State<'_, AppState>,
     app: AppHandle,

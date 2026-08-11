@@ -1,3 +1,4 @@
+import type { ActionSignal } from "./github";
 import type { TodoSource } from "./todo";
 
 /** Mirrors Rust `models::focus::FocusSectionState`. */
@@ -37,6 +38,8 @@ export interface FocusGithub {
   updatedAt: string;
   pinned: boolean;
   matches: string[];
+  /** Stable action signals of the source item (empty for old caches). */
+  signals: ActionSignal[];
 }
 
 /** One Focus section with per-domain state (read-only projection). */

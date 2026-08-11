@@ -9,6 +9,8 @@ export const removeWatch = (fullName: string) =>
   call<RepoWatch[]>("github_watch_remove", { fullName });
 export const filters = (fullName: string, filters: string[]) =>
   call<RepoWatch[]>("github_watch_filters", { fullName, filters });
+export const signalFilters = (fullName: string, filters: string[]) =>
+  call<RepoWatch[]>("github_watch_signal_filters", { fullName, filters });
 export const collapsed = (fullName: string, collapsed: boolean) =>
   call<RepoWatch[]>("github_watch_collapsed", { fullName, collapsed });
 export const ignoreItem = (fullName: string, number: number, kind: string) =>

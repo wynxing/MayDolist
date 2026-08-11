@@ -152,6 +152,19 @@ async function clearTrash() {
           />
         </label>
 
+        <label class="settings-row">
+          <span>
+            GitHub 长期未更新阈值
+            <small>天，0 为关闭该信号</small>
+          </span>
+          <input
+            v-model.number="settings.config.githubStaleDays"
+            type="number"
+            min="0"
+            class="input settings-control"
+          />
+        </label>
+
         <div class="settings-row">
           <span>开机自启</span>
           <label class="settings-switch">

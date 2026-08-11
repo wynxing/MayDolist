@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::TodoSource;
+use super::{ActionSignal, TodoSource};
 
 /// Per-section load state of the Focus read-only projection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +54,8 @@ pub struct FocusGithub {
     pub updated_at: String,
     pub pinned: bool,
     pub matches: Vec<String>,
+    /// Stable action signals of the source item (empty for old caches).
+    pub signals: Vec<ActionSignal>,
 }
 
 /// One Focus section (todo / note / github) with per-domain state so a single

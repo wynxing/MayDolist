@@ -2,12 +2,20 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useGithubStore } from "../stores/github";
 import { useTodoStore } from "../stores/todo";
-import type { GhIssue, GhPullRequest, RepoSnapshot, RepoWatch } from "../types/github";
+import { SIGNAL_FILTER_OPTIONS, signalBadges } from "../signals";
+import type {
+  ActionSignal,
+  GhIssue,
+  GhPullRequest,
+  RepoSnapshot,
+  RepoWatch,
+} from "../types/github";
 
 const s = useGithubStore();
 const todo = useTodoStore();
 const repo = ref("");
 const busy = ref(false);
+const repoBusy = reactive<Record<string, boolean>>({});
 const pinDrafts = reactive<Record<string, string>>({});
 const pinBusy = reactive<Record<string, boolean>>({});
 const pinErrors = reactive<Record<string, string | null>>({});
@@ -22,6 +30,8 @@ const filters = [
   ["involved", "参与"],
   ["all-prs", "全部 PR"],
 ] as const;
+
+const signalFilters = SIGNAL_FILTER_OPTIONS;
 
 onMounted(() => s.init());
 
@@ -43,7 +53,9 @@ function visiblePrs(watch: RepoWatch) {
       .filter((v) => v.kind === "pr")
       .map((v) => v.number),
   );
-  return snap.pullRequests.filter((pr) => !ignored.has(pr.number));
+  return snap.pullRequests.filter(
+    (pr) => !ignored.has(pr.number) && passesSignalFilter(watch, pr.signals),
+  );
 }
 
 function visibleIssues(watch: RepoWatch) {
@@ -54,7 +66,16 @@ function visibleIssues(watch: RepoWatch) {
       .filter((v) => v.kind === "issue")
       .map((v) => v.number),
   );
-  return snap.issues.filter((issue) => !ignored.has(issue.number));
+  return snap.issues.filter(
+    (issue) => !ignored.has(issue.number) && passesSignalFilter(watch, issue.signals),
+  );
+}
+
+/** Empty signal filters keep the legacy behavior (show everything). */
+function passesSignalFilter(watch: RepoWatch, signals: ActionSignal[]) {
+  const active = (watch.signalFilters ?? []) as ActionSignal[];
+  if (!active.length) return true;
+  return active.some((signal) => signals.includes(signal));
 }
 
 function summary(watch: RepoWatch) {
@@ -65,6 +86,16 @@ function summary(watch: RepoWatch) {
   if (issues) parts.push(`${issues} Issue`);
   if (!parts.length) return "无条目";
   return parts.join(" · ");
+}
+
+function snapshotMeta(watch: RepoWatch) {
+  const snap = snapFor(watch);
+  if (!snap) return "";
+  const fetched = `快照 ${formatTime(snap.fetchedAt)}`;
+  const signals = snap.signalsComputedAt
+    ? `信号 ${formatTime(snap.signalsComputedAt)}`
+    : "旧缓存";
+  return `${fetched} · ${signals}`;
 }
 
 async function add() {
@@ -87,11 +118,27 @@ async function refresh() {
   }
 }
 
+async function refreshRepo(repoName: string) {
+  repoBusy[repoName] = true;
+  try {
+    await s.refreshRepo(repoName);
+  } finally {
+    repoBusy[repoName] = false;
+  }
+}
+
 function toggle(name: string, current: string[], value: string) {
   const next = current.includes(value)
     ? current.filter((v) => v !== value)
     : [...current, value];
   void s.setFilters(name, next);
+}
+
+function toggleSignalFilter(name: string, current: string[], value: ActionSignal) {
+  const next = current.includes(value)
+    ? current.filter((v) => v !== value)
+    : [...current, value];
+  void s.setSignalFilters(name, next);
 }
 
 function toggleCollapsed(watch: RepoWatch) {
@@ -107,6 +154,17 @@ function matchLabel(matches: string[]) {
       return found ? found[1] : m;
     })
     .join(" · ");
+}
+
+function formatTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 async function ignorePr(repoName: string, pr: GhPullRequest) {
@@ -235,6 +293,15 @@ function convertLabel(key: string) {
           }}</span>
           <h3>{{ watch.fullName }}</h3>
           <span class="snapshot-meta">{{ summary(watch) }}</span>
+          <small v-if="snapshotMeta(watch)" class="snapshot-time">{{ snapshotMeta(watch) }}</small>
+        </button>
+        <button
+          class="btn"
+          :disabled="repoBusy[watch.fullName]"
+          :title="`刷新 ${watch.fullName}`"
+          @click="refreshRepo(watch.fullName)"
+        >
+          {{ repoBusy[watch.fullName] ? "刷新中…" : "刷新" }}
         </button>
         <button class="btn danger" @click="s.removeWatch(watch.fullName)">移除</button>
       </header>
@@ -249,6 +316,27 @@ function convertLabel(key: string) {
             />
             {{ f[1] }}
           </label>
+        </div>
+
+        <div class="filter-row gh-signal-row">
+          <span class="gh-signal-label">行动信号</span>
+          <label v-for="f in signalFilters" :key="f[0]">
+            <input
+              type="checkbox"
+              :checked="(watch.signalFilters ?? []).includes(f[0])"
+              @change="toggleSignalFilter(watch.fullName, watch.signalFilters ?? [], f[0])"
+            />
+            {{ f[1] }}
+          </label>
+          <button
+            v-if="(watch.signalFilters ?? []).length"
+            class="btn ghost compact gh-clear-signals"
+            type="button"
+            title="清除行动信号过滤，恢复默认列表"
+            @click="s.setSignalFilters(watch.fullName, [])"
+          >
+            清除
+          </button>
         </div>
 
         <div class="gh-pin-row">
@@ -275,6 +363,9 @@ function convertLabel(key: string) {
           <p v-if="snapFor(watch)!.lastError" class="error">
             缓存数据：{{ snapFor(watch)!.lastError }}
           </p>
+          <p v-if="!snapFor(watch)!.signalsComputedAt" class="gh-empty">
+            旧缓存：无行动信号字段，刷新后自动补全
+          </p>
 
           <h4>Pull Requests</h4>
           <div
@@ -284,8 +375,22 @@ function convertLabel(key: string) {
             :class="{ dimmed: isClosed(pr.state) }"
           >
             <button class="gh-link" type="button" @click="s.open(pr.url)">
-              <span>#{{ pr.number }} {{ pr.title }}</span>
-              <small>{{ matchLabel(pr.matches) }}</small>
+              <span class="gh-title-block">
+                <span class="gh-title">#{{ pr.number }} {{ pr.title }}</span>
+                <span class="gh-signals">
+                  <span
+                    v-for="b in signalBadges(pr.signals)"
+                    :key="b.key"
+                    class="gh-signal-badge"
+                    :class="b.key"
+                  >
+                    {{ b.label }}
+                  </span>
+                </span>
+              </span>
+              <small class="gh-link-meta">
+                {{ matchLabel(pr.matches) }} · 更新 {{ formatTime(pr.updatedAt) }}
+              </small>
             </button>
             <button
               class="btn ghost gh-convert"
@@ -329,8 +434,22 @@ function convertLabel(key: string) {
             :class="{ dimmed: isClosed(issue.state) }"
           >
             <button class="gh-link" type="button" @click="s.open(issue.url)">
-              <span>#{{ issue.number }} {{ issue.title }}</span>
-              <small>{{ matchLabel(issue.matches) }}</small>
+              <span class="gh-title-block">
+                <span class="gh-title">#{{ issue.number }} {{ issue.title }}</span>
+                <span class="gh-signals">
+                  <span
+                    v-for="b in signalBadges(issue.signals)"
+                    :key="b.key"
+                    class="gh-signal-badge"
+                    :class="b.key"
+                  >
+                    {{ b.label }}
+                  </span>
+                </span>
+              </span>
+              <small class="gh-link-meta">
+                {{ matchLabel(issue.matches) }} · 更新 {{ formatTime(issue.updatedAt) }}
+              </small>
             </button>
             <button
               class="btn ghost gh-convert"
