@@ -11,8 +11,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
-| #18 | Focus 统一视图 | #17 | 进行中 | - | - | activeThreadId: `1dfe29ce-973d-440e-846d-cf09f851bfa3`（worktree 创建中） |
-| #19 | GitHub 条目转 Todo | #17/#18 | 待做 | - | - | |
+| #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
+| #19 | GitHub 条目转 Todo | #17/#18 | 进行中 | - | - | activeThreadId: 创建中（本轮回写） |
 | #20 | GitHub 可行动信号 | #18/#19 | 待做 | - | - | |
 | #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
 
@@ -29,6 +29,20 @@
 - [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy/test 34 passed）
 - [x] PR [#22](https://github.com/wynxing/MayDolist/pull/22) 合并（merge commit `ddfd778`），issue #17 已自动关闭
 
+## 验收清单（#18 Focus 统一视图）
+
+- [x] 主面板新增「今日」(Focus) Tab，并作为默认打开页（托盘 / 快捷键跳转行为不变）
+- [x] 只读投影：`FocusService` + `focus_overview` 命令，并行加载 Todo / Note / GitHub，任一领域失败只产生局部错误，不阻塞其他区块
+- [x] 聚合规则：未完成 Todo「收件箱」优先；便签置顶 + 最近更新（id 去重）；GitHub 只取本地快照 open 条目、手动钉住优先；上限 Todo 50 / 便签 8 / GitHub 30
+- [x] 前端 FocusView + focus store：完成 Todo、打开来源、进入对应模块（便签携带 id 打开编辑 + 保留悬浮）等最小动作
+- [x] 加载 / 空 / 局部失败 / 离线缓存状态齐全；`entity-changed` 防抖刷新，多窗口一致
+- [x] 窄窗响应式布局与键盘焦点顺序
+- [x] 不改变领域文件格式（无新增持久化字段；新增字段仅属于 Focus 投影结构，向后兼容）
+- [x] 文档更新（README / architecture.md，说明排序与纳入规则）
+- [x] 单元测试：聚合排序、去重、来源映射、离线缓存标记、局部失败隔离、真实数据聚合（cargo test 41 passed）
+- [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 41 passed）
+- [x] PR [#23](https://github.com/wynxing/MayDolist/pull/23) 合并（merge commit `8259291`），issue #18 已自动关闭
+
 ## 交接记录
 
 ### 自动化编排启动（2026-08-11）
@@ -42,3 +56,8 @@
 - 工作区注意：恢复源码后 `git add -- src src-tauri public` 刷新了 stat 缓存（内容无变化）；未跟踪文件 `liquid-glass-*.png` 保留不动，不入提交。
 - 完成证据：PR #22（CI 2m53s 全绿）→ squash 合并 → issue #17 自动关闭。
 - 下一轮：#18 Focus 统一视图（依赖 #17），开场指令见上一轮对话结尾。
+
+### 轮次 2（#18，已完成）
+
+- 完成证据：PR #23（CI 3m22s 全绿）→ squash 合并（merge commit `8259291`）→ issue #18 自动关闭。
+- 下一轮：#19 GitHub 条目转 Todo（依赖 #17/#18），线程已即时创建（threadId 见 #19 行备注），开场指令见本轮交接摘要。
