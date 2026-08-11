@@ -120,3 +120,8 @@
 - 完成证据：PR #26（CI 3m56s 全绿）→ squash 合并（merge commit `c614c9e`）→ issue #21 自动关闭。
 - 实现要点：ZIP 数据包（`manifest.json` `packageSchemaVersion=1` + config / notes / todos / watchlist + 可选 cache，不含 logs / backups / 凭据）；导入「预览确认 → 自动备份当前数据 → 同卷 staging 校验 → 持锁原子交换（失败逐项回滚）→ 广播 settings-changed + entity-changed」；路径安全 / 版本 / 重复 / 非法 JSON 拒绝，损坏 cache 跳过降级；设置页「数据安全」（导出 / 导入 / 备份 / 打开数据目录 / 最近备份，轮转保留 10 份）；tauri-plugin-dialog + `dialog:default`；日志不写文件内容与凭据。cargo test 76 passed。
 - 下一轮：#16 RFC：演进为开发者行动收件箱（全部实现已就绪，最后收尾项），线程待创建者即时创建并回写 activeThreadId。
+
+### 轮次 6（#16，创建中，2026-08-12 并发去重）
+
+- 同一时间窗口内有多个控制器 run 并发唤醒：15:22 run（019ff1a2）先创建 #16 线程 `019ff329-5061-7e60-bb6b-4fe744ebc3c9`（worktree `7e01`，分支 `codex/issue-16-rfc-action-inbox`）并回写 activeThreadId（提交 `9900b20`）；本 run 随后创建的重名线程 `019ff329-fb8f-76c1-8635-bd73172c7487`（worktree `1641`，分支 `codex/issue-16-rfc-inbox`）已按 tracker 去重规则通知停止，未推送任何内容。
+- 进行中：#16 由 `019ff329-5061` 线程执行，完成后全部 6 个 issue 收官（#17 已完成 + #18-#21 及 #16 均 ✅），自动化输出完成总结并暂停。
