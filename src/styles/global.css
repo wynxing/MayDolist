@@ -1388,3 +1388,59 @@ textarea.input {
 .floating.collapsed { padding-bottom: 4px; }
 .floating.collapsed header { border-bottom-color: transparent; }
 .floating-error { color: var(--danger); user-select: text; }
+
+/* Quick capture window (see views/QuickCapture.vue). */
+.quick-capture {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background-image: var(--glass-tint);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+}
+.quick-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  background-color: var(--field);
+  box-shadow: none;
+  border-radius: 10px;
+}
+.quick-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  outline: 0;
+}
+.quick-input:focus {
+  border-color: var(--accent);
+}
+.quick-input::placeholder {
+  color: var(--muted);
+}
+.quick-submit {
+  flex: none;
+}
+.quick-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.quick-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  user-select: text;
+}

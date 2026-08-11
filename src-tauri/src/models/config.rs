@@ -14,6 +14,14 @@ fn default_floating_note_glass_opacity() -> f64 {
     0.46
 }
 
+fn default_quick_capture_hotkey() -> String {
+    "Ctrl+Alt+Space".into()
+}
+
+fn default_quick_capture_enabled() -> bool {
+    true
+}
+
 fn deserialize_string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -32,6 +40,12 @@ pub struct AppConfig {
     pub hot_corner: String,
     /// Global hotkey for the main panel (e.g. "Ctrl+Alt+M").
     pub hotkey: String,
+    /// Global hotkey for the quick capture window (e.g. "Ctrl+Alt+Space").
+    #[serde(default = "default_quick_capture_hotkey")]
+    pub quick_capture_hotkey: String,
+    /// Whether the quick capture window and its hotkey are enabled.
+    #[serde(default = "default_quick_capture_enabled")]
+    pub quick_capture_enabled: bool,
     pub theme: String,
     pub github_refresh_interval_minutes: u32,
     pub autostart: bool,
@@ -51,6 +65,10 @@ impl AppConfig {
     pub fn sanitize(&mut self) -> bool {
         let schema_before = self.schema_version;
         self.schema_version = CONFIG_SCHEMA_VERSION;
+        let quick_hotkey_before = self.quick_capture_hotkey.clone();
+        if self.quick_capture_hotkey.trim().is_empty() {
+            self.quick_capture_hotkey = default_quick_capture_hotkey();
+        }
         let main_before = self.main_window_glass_opacity;
         self.main_window_glass_opacity = if self.main_window_glass_opacity.is_finite() {
             self.main_window_glass_opacity
@@ -66,6 +84,7 @@ impl AppConfig {
             default_floating_note_glass_opacity()
         };
         schema_before != self.schema_version
+            || quick_hotkey_before != self.quick_capture_hotkey
             || main_before != self.main_window_glass_opacity
             || floating_before != self.floating_note_glass_opacity
     }
@@ -78,6 +97,8 @@ impl Default for AppConfig {
             data_dir: String::new(),
             hot_corner: "top-right".into(),
             hotkey: "Ctrl+Alt+M".into(),
+            quick_capture_hotkey: default_quick_capture_hotkey(),
+            quick_capture_enabled: default_quick_capture_enabled(),
             theme: "system".into(),
             github_refresh_interval_minutes: 30,
             autostart: false,
@@ -139,6 +160,37 @@ mod tests {
     }
 
     #[test]
+    fn defaults_include_quick_capture_settings() {
+        let config = AppConfig::default();
+        assert_eq!(config.quick_capture_hotkey, "Ctrl+Alt+Space");
+        assert!(config.quick_capture_enabled);
+    }
+
+    #[test]
+    fn sanitize_replaces_empty_quick_capture_hotkey() {
+        let mut config = AppConfig {
+            quick_capture_hotkey: "  ".into(),
+            ..Default::default()
+        };
+        assert!(config.sanitize());
+        assert_eq!(config.quick_capture_hotkey, "Ctrl+Alt+Space");
+    }
+
+    #[test]
+    fn quick_capture_fields_roundtrip_through_serde_camel_case() {
+        let config = AppConfig {
+            quick_capture_hotkey: "Ctrl+Shift+Q".into(),
+            quick_capture_enabled: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"quickCaptureHotkey\":\"Ctrl+Shift+Q\""));
+        assert!(json.contains("\"quickCaptureEnabled\":false"));
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, config);
+    }
+
+    #[test]
     fn opacity_fields_roundtrip_through_serde_camel_case() {
         let config = AppConfig {
             main_window_glass_opacity: 0.66,
@@ -167,6 +219,8 @@ mod tests {
         let mut restored: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(restored.theme, "light");
         assert_eq!(restored.hotkey, "Ctrl+Shift+M");
+        assert_eq!(restored.quick_capture_hotkey, "Ctrl+Alt+Space");
+        assert!(restored.quick_capture_enabled);
         assert_eq!(restored.main_window_glass_opacity, 0.52);
         assert_eq!(restored.floating_note_glass_opacity, 0.46);
         assert!(restored.sanitize());

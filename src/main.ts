@@ -7,6 +7,7 @@ import { useUpdateStore } from "./stores/update";
 const pinia = createPinia();
 createApp(App).use(pinia).mount("#app");
 
-if (!new URLSearchParams(location.search).has("note")) {
+const params = new URLSearchParams(location.search);
+if (!params.has("note") && !params.has("quick")) {
   void useUpdateStore(pinia).init();
 }

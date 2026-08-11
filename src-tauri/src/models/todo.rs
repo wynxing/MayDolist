@@ -19,6 +19,10 @@ pub struct TodoList {
     pub schema_version: u32,
     pub id: String,
     pub title: String,
+    /// Optional stable marker for system-managed lists (e.g. "inbox"). Old
+    /// data without the field reads as None and behaves like a normal list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub sort_order: i32,
     pub deleted: bool,
     pub created_at: String,
