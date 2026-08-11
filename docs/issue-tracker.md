@@ -13,8 +13,8 @@
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
-| #20 | GitHub 可行动信号 | #18/#19 | 进行中 | - | - | activeThreadId: `019ff170-2ab6-7201-a181-e2148d8cd8a2`（worktree） |
-| #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
+| #20 | GitHub 可行动信号 | #18/#19 | ✅ 已完成 | `codex/issue-20-action-signals` | [#25](https://github.com/wynxing/MayDolist/pull/25) | CI 绿 + 已合并 + issue 自动关闭 |
+| #21 | 备份 / 导入 / 恢复 | 无 | 进行中 | - | - | activeThreadId: `019ff1ad-8212-7380-b82b-6855de03857f`（worktree） |
 
 ## 验收清单（#17 快速收集入口与 Inbox）
 
@@ -56,6 +56,20 @@
 - [x] 文档更新（architecture.md 数据布局与跨模块引用 + README.md）
 - [x] PR [#24](https://github.com/wynxing/MayDolist/pull/24) 合并（merge commit `f3d4ff2`），issue #19 已自动关闭
 
+## 验收清单（#20 GitHub 可行动信号）
+
+- [x] 扩展 GitHub 内部 API response model：assignee、requested reviewers（PR 详情）、draft、checks（status + check-runs 兜底）、更新时间
+- [x] 稳定枚举 `ActionSignal`（needsAction / needsReview / ciFailed / stale / draft），UI 不依赖 GitHub 原始字符串
+- [x] `RepoSnapshot` 向后兼容信号字段（条目级 signals 等 + 快照级 `signalsComputedAt`），旧缓存读取默认空值、刷新自动补全
+- [x] 按行动信号过滤入口（默认空 = 保持旧行为）+ 单仓库刷新；`githubStaleDays` 配置（默认 14 天，0 关闭），stale 读取时实时计算
+- [x] GitHub 视图与 Focus 视图展示信号徽标、最后更新时间与本地缓存状态（旧缓存提示）
+- [x] 刷新失败 / 认证失败 / 网络失败 / 缺字段降级：保留旧缓存、不清空其他仓库；全部刷新按仓库串行 + 同仓库并发去重；未变化 PR 复用缓存详情（rate-limit 友好）
+- [x] 文档更新：architecture.md（数据布局 / 缓存策略 / 权限说明）+ README.md
+- [x] 单元测试：response fixture→signal 映射、新旧 schema 兼容、过滤器 / 排序 / stale 边界、真实数据聚合（cargo test 62 passed）
+- [x] 前端不直接写文件；GitHub API 调用在 Rust service 中执行，阻塞调用走 spawn_blocking
+- [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 62 passed）
+- [x] PR [#25](https://github.com/wynxing/MayDolist/pull/25) 合并（merge commit `9d127fa`），issue #20 已自动关闭
+
 ## 交接记录
 
 ### 自动化编排启动（2026-08-11）
@@ -80,3 +94,9 @@
 - 完成证据：PR #24（CI 3m43s + rebase 后 2m48s 全绿）→ squash 合并（merge commit `f3d4ff2`）→ issue #19 自动关闭。
 - 实现要点：Todo 可选 `source`（`type`/`repo`/`number`/`url`，serde 默认值向后兼容）；`todo_create_from_github` 命令默认进 Inbox（复用 `ensure_inbox`）；GitHub 行「转为 Todo」带保存中/成功/失败反馈；Todo 与 Focus 视图来源徽标 + 「打开来源」（仅 http/https）；不触碰 GitHub 缓存/认证/网络；前端不直接写文件。cargo test 48 passed。
 - 下一轮：#20 GitHub 可行动信号（依赖 #18/#19），线程已即时创建（threadId `019ff170-2ab6-7201-a181-e2148d8cd8a2`，worktree `C:\Users\wynn\.codex\worktrees\3bc6\MayDolist`），开场指令见本轮交接摘要。
+
+### 轮次 4（#20，已完成）
+
+- 完成证据：PR #25（CI 2m56s 全绿）→ squash 合并（merge commit `9d127fa`）→ issue #20 自动关闭。
+- 实现要点：稳定 `ActionSignal` 枚举与徽标（需要我处理 / 需要 Review / CI 失败 / 长期未更新 / Draft）；PR 详情 + checks 枚举（未变化 PR 复用缓存详情）；RepoSnapshot 信号字段全向后兼容；行动信号过滤（默认关闭保持旧列表）；全部刷新串行 + 同仓库并发去重 + 单仓库失败不清空其他仓库；Focus 只聚合带可行动信号的 open 条目；`githubStaleDays` 可配置（默认 14 天）。cargo test 62 passed。
+- 下一轮：#21 备份 / 导入 / 恢复，线程已即时创建（threadId `019ff1ad-8212-7380-b82b-6855de03857f`，worktree `C:\Users\wynn\.codex\worktrees\1fe5\MayDolist`），开场指令见本轮交接摘要。
