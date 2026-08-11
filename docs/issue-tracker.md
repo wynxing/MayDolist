@@ -9,7 +9,7 @@
 
 | Issue | 标题 | 依赖 | 状态 | 分支 | PR | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 进行中 | - | - | 最后收尾 |
+| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 进行中 | - | - | 最后收尾；activeThreadId: `019ff329-5061-7e60-bb6b-4fe744ebc3c9`（worktree） |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
