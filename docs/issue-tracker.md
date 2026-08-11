@@ -3,13 +3,15 @@
 > 每个 issue 一轮独立对话。新对话开场先读本文件 + 目标 issue 全文 + 最新 `main`。
 > 完成标准：自动化校验全绿（`pnpm check` / `pnpm build` / `cargo fmt` / `cargo clippy` / `cargo test`）、PR 合并、issue 自动关闭。
 
+> 编排模式：由「巡检控制器」每小时兜底巡检 + 每轮线程即时串联（用 create_thread 创建下一轮）。tracker 的 activeThreadId 由创建者写入、完成者清除；控制器据此去重。
+
 ## 总体安排
 
 | Issue | 标题 | 依赖 | 状态 | 分支 | PR | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
-| #18 | Focus 统一视图 | #17 | 待做（下一轮） | - | - | |
+| #18 | Focus 统一视图 | #17 | 进行中 | - | - | activeThreadId: `1dfe29ce-973d-440e-846d-cf09f851bfa3`（worktree 创建中） |
 | #19 | GitHub 条目转 Todo | #17/#18 | 待做 | - | - | |
 | #20 | GitHub 可行动信号 | #18/#19 | 待做 | - | - | |
 | #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
@@ -28,6 +30,12 @@
 - [x] PR [#22](https://github.com/wynxing/MayDolist/pull/22) 合并（merge commit `ddfd778`），issue #17 已自动关闭
 
 ## 交接记录
+
+### 自动化编排启动（2026-08-11）
+
+- 巡检控制器：`MayDolist Issue 编排巡检`（automationId `maydolist-issue`，cron 每小时，failed_runs_only）。
+- #18 线程已由控制器编排创建（clientThreadId `1dfe29ce-973d-440e-846d-cf09f851bfa3`，worktree 环境），完成校验合并后将即时创建 #19。
+- 失败策略：当轮自动修复重跑直到全绿；连续 3 次同因失败则暂停并通知，不跳过。
 
 ### 轮次 1（#17，已完成）
 
