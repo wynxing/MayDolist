@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { call } from "../api";
+import * as backupApi from "../api/backup";
 import { useSettingsStore } from "../stores/settings";
 import { useUpdateStore } from "../stores/update";
+import type { BackupInfo } from "../types/backup";
 
 type TrashRow = { id: string; title: string };
 type Trash = {
@@ -16,6 +19,11 @@ const updater = useUpdateStore();
 const target = ref("");
 const trash = ref<Trash | null>(null);
 const message = ref("");
+const recentBackups = ref<BackupInfo[]>([]);
+const includeCache = ref(true);
+const dataBusy = ref(false);
+const dataMessage = ref("");
+const dataError = ref("");
 
 const trashGroups = [
   { kind: "todoList", key: "todoLists", label: "待办列表" },
@@ -34,7 +42,90 @@ onMounted(async () => {
   await settings.init();
   await updater.init();
   trash.value = await call<Trash>("trash_list");
+  recentBackups.value = await backupApi.listBackups().catch(() => []);
 });
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function dataStamp() {
+  const d = new Date();
+  const pad = (v: number) => String(v).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+async function refreshBackups() {
+  recentBackups.value = await backupApi.listBackups();
+}
+
+async function runDataAction(label: string, fn: () => Promise<void>) {
+  dataBusy.value = true;
+  dataError.value = "";
+  dataMessage.value = "";
+  try {
+    await fn();
+  } catch (err) {
+    dataError.value = `${label}失败：${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    dataBusy.value = false;
+  }
+}
+
+async function exportData() {
+  const target = await saveDialog({
+    title: "导出 MayDolist 数据",
+    defaultPath: `maydolist-export-${dataStamp()}.zip`,
+    filters: [{ name: "MayDolist 数据包", extensions: ["zip"] }],
+  });
+  if (!target) return;
+  await runDataAction("导出", async () => {
+    const info = await backupApi.exportData(target, includeCache.value);
+    dataMessage.value = `已导出到 ${info.path}（便签 ${info.notes}、待办列表 ${info.todos}${info.githubCache ? `、GitHub 缓存 ${info.githubCache}` : ""}）`;
+  });
+}
+
+async function importData() {
+  const file = await open({
+    title: "导入 MayDolist 数据",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "MayDolist 数据包", extensions: ["zip"] }],
+  });
+  if (!file || Array.isArray(file)) return;
+  await runDataAction("导入", async () => {
+    const preview = await backupApi.inspectPackage(file);
+    const confirmText =
+      `即将导入数据包：\n` +
+      `- 包格式版本：${preview.packageSchemaVersion}\n` +
+      `- 导出应用版本：${preview.appVersion}\n` +
+      `- 便签 ${preview.notes} 份、待办列表 ${preview.todos} 份\n` +
+      `- GitHub 追踪列表：${preview.hasWatchlist ? "有" : "无"}、缓存 ${preview.githubCache} 份` +
+      (preview.skippedCache ? `（将跳过损坏缓存 ${preview.skippedCache} 份）` : "") +
+      `\n\n导入会覆盖当前数据，导入前会自动备份现有数据。确定继续？`;
+    if (!window.confirm(confirmText)) return;
+    const info = await backupApi.importPackage(file);
+    dataMessage.value = `导入完成：便签 ${info.notes}、待办列表 ${info.todos}${info.githubCache ? `、GitHub 缓存 ${info.githubCache}` : ""}${info.skippedCache ? `（跳过损坏缓存 ${info.skippedCache} 份）` : ""}；导入前已自动备份到 ${info.backupPath}`;
+    trash.value = await call<Trash>("trash_list");
+    await refreshBackups();
+  });
+}
+
+async function createBackup() {
+  await runDataAction("创建备份", async () => {
+    const info = await backupApi.createBackup();
+    dataMessage.value = `备份已创建：${info.path}`;
+    await refreshBackups();
+  });
+}
+
+async function openDataDir() {
+  await runDataAction("打开数据目录", async () => {
+    await backupApi.openDataDir();
+  });
+}
 
 function formatCheckTime(value: string | null) {
   return value ? new Date(value).toLocaleString("zh-CN") : "尚未检查";
@@ -261,6 +352,41 @@ async function clearTrash() {
         <input v-model="target" class="input" placeholder="输入新的绝对目录" />
         <button class="btn" :disabled="!target" @click="migrate">迁移</button>
       </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>数据安全</h3>
+      <p class="settings-note">
+        数据包为 ZIP 格式，包含配置、待办、便签与 GitHub 追踪列表，不含任何登录凭据；
+        导入前会先自动备份当前数据，校验失败不会改动现有数据。
+      </p>
+      <div class="settings-grid">
+        <label class="settings-row">
+          <span>
+            包含 GitHub 缓存
+            <small>导出时附带可重建的 GitHub 快照缓存，离线可查看</small>
+          </span>
+          <label class="settings-switch">
+            <input v-model="includeCache" type="checkbox" />
+            <span>导出时包含</span>
+          </label>
+        </label>
+      </div>
+      <div class="settings-actions data-actions">
+        <button class="btn primary" :disabled="dataBusy" @click="exportData">导出数据</button>
+        <button class="btn" :disabled="dataBusy" @click="importData">导入数据</button>
+        <button class="btn" :disabled="dataBusy" @click="createBackup">创建备份</button>
+        <button class="btn" :disabled="dataBusy" @click="openDataDir">打开数据目录</button>
+      </div>
+      <p v-if="dataMessage" class="settings-message data-message" role="status">{{ dataMessage }}</p>
+      <p v-if="dataError" class="update-error" role="alert">{{ dataError }}</p>
+      <div v-if="recentBackups.length" class="backup-list">
+        <div class="backup-row" v-for="backup in recentBackups" :key="backup.path">
+          <span class="backup-name">{{ backup.name }}</span>
+          <span class="backup-meta">{{ backup.createdAt }} · {{ formatSize(backup.size) }}</span>
+        </div>
+      </div>
+      <p v-else class="settings-empty">暂无备份，可点击「创建备份」或通过导入自动生成</p>
     </div>
 
     <div class="settings-section">

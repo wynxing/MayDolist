@@ -184,6 +184,70 @@ impl Storage {
         Ok(())
     }
 
+    /// Atomically replace the domain files (`config.json`, `notes/`, `todos/`,
+    /// `github/`) with the content of `staging`, holding the write lock for
+    /// the whole operation so no concurrent write can race the swap. `staging`
+    /// must contain exactly those entries as a valid JSON tree. On failure the
+    /// original tree is restored; `logs/` and `backups/` are never touched.
+    pub fn replace_domain(&self, staging: &Path) -> AppResult<()> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+        validate_json_tree(staging)?;
+        const ENTRIES: [&str; 4] = ["config.json", "notes", "todos", "github"];
+        for entry in ENTRIES {
+            if !staging.join(entry).exists() {
+                return Err(AppError::InvalidInput(format!(
+                    "staging is missing required entry: {entry}"
+                )));
+            }
+        }
+        let current = self.data_dir();
+        let parent = current
+            .parent()
+            .ok_or_else(|| AppError::Internal("data dir has no parent".into()))?;
+        let rollback = parent.join(format!(
+            "{}-rollback-{}",
+            current.file_name().unwrap_or_default().to_string_lossy(),
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&rollback)?;
+
+        // Phase 1: move the current entries aside.
+        let mut moved: Vec<(&str, PathBuf)> = Vec::new();
+        for entry in ENTRIES {
+            let from = current.join(entry);
+            let to = rollback.join(entry);
+            if from.exists() {
+                if let Err(err) = fs::rename(&from, &to) {
+                    restore_moved(&current, &moved);
+                    return Err(err.into());
+                }
+                moved.push((entry, to));
+            }
+        }
+        // Phase 2: move the staged entries into place. Any failure restores
+        // every entry that was moved aside.
+        let mut placed: Vec<&str> = Vec::new();
+        for entry in ENTRIES {
+            let from = staging.join(entry);
+            let to = current.join(entry);
+            if let Err(err) = fs::rename(&from, &to) {
+                for entry in &placed {
+                    remove_path(&current.join(entry));
+                }
+                restore_moved(&current, &moved);
+                return Err(err.into());
+            }
+            placed.push(entry);
+        }
+        // Success: drop the aside copies (the caller made a full ZIP backup
+        // before the swap).
+        fs::remove_dir_all(&rollback).ok();
+        Ok(())
+    }
+
     pub fn read_json<T: DeserializeOwned>(&self, path: &Path) -> AppResult<Option<T>> {
         let raw = match fs::read_to_string(path) {
             Ok(raw) => raw,
@@ -335,6 +399,20 @@ fn validate_json_tree(root: &Path) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn restore_moved(current: &Path, moved: &[(&str, PathBuf)]) {
+    for (entry, rollback_path) in moved.iter().rev() {
+        fs::rename(rollback_path, current.join(entry)).ok();
+    }
+}
+
+fn remove_path(path: &Path) {
+    if path.is_dir() {
+        fs::remove_dir_all(path).ok();
+    } else {
+        fs::remove_file(path).ok();
+    }
 }
 
 #[cfg(test)]
@@ -537,6 +615,84 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
         assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
         assert!(persisted.get("mainWindowGlassOpacity").is_some());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn replace_domain_swaps_entries_atomically() {
+        let dir = temp_dir("replace-ok");
+        let storage = Storage::with_dir(&dir).unwrap();
+        storage
+            .save_config(&AppConfig {
+                theme: "old".into(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let staging = dir.join("staging");
+        for sub in ["notes", "todos", "github/cache"] {
+            fs::create_dir_all(staging.join(sub)).unwrap();
+        }
+        fs::write(
+            staging.join("config.json"),
+            r#"{"schemaVersion":2,"dataDir":"x","hotCorner":"top-right","hotkey":"Ctrl+Alt+M","theme":"new","githubRefreshIntervalMinutes":30,"autostart":false,"firstRun":false}"#,
+        )
+        .unwrap();
+        fs::write(staging.join("notes/note-a.json"), r#"{"id":"a"}"#).unwrap();
+        fs::write(
+            staging.join("github/cache/owner_repo.json"),
+            r#"{"repo":"owner/repo"}"#,
+        )
+        .unwrap();
+
+        storage.replace_domain(&staging).unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
+        assert_eq!(persisted["theme"], "new");
+        assert!(dir.join("notes/note-a.json").exists());
+        assert!(dir.join("github/cache/owner_repo.json").exists());
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains("rollback"))
+            .collect();
+        assert!(leftovers.is_empty(), "rollback dir must be removed");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn replace_domain_failure_keeps_original_data() {
+        let dir = temp_dir("replace-fail");
+        let storage = Storage::with_dir(&dir).unwrap();
+        storage
+            .save_config(&AppConfig {
+                theme: "old".into(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Staging missing a required entry.
+        let missing = dir.join("staging-missing");
+        fs::create_dir_all(&missing).unwrap();
+        fs::write(missing.join("config.json"), "{}").unwrap();
+        assert!(storage.replace_domain(&missing).is_err());
+        assert_eq!(storage.load_config().unwrap().theme, "old");
+
+        // Staging containing invalid JSON.
+        let invalid = dir.join("staging-invalid");
+        for sub in ["notes", "todos", "github"] {
+            fs::create_dir_all(invalid.join(sub)).unwrap();
+        }
+        fs::write(invalid.join("config.json"), "{broken").unwrap();
+        assert!(storage.replace_domain(&invalid).is_err());
+        assert_eq!(storage.load_config().unwrap().theme, "old");
+        assert!(
+            fs::read_to_string(storage.config_path())
+                .unwrap()
+                .contains("old"),
+            "original config must be untouched"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

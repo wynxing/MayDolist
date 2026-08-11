@@ -136,6 +136,7 @@ sequenceDiagram
 | `app` | 窗口创建与管理、托盘、热角、全局快捷键 | 业务数据读写 |
 | `commands` | 暴露给前端的 Tauri Commands，做参数校验与错误转换 | 业务规则 |
 | `storage` | 数据目录解析、JSON 序列化 / 反序列化、原子写盘 | GitHub 数据获取 |
+| `backup` | 数据包导出 / 导入校验 / 备份轮转 / 恢复（临时目录校验 + 原子替换） | UI 展示 |
 | `github` | gh 子进程调用、响应解析、缓存读写、定时刷新 | UI 展示 |
 | `focus` | 跨领域只读投影：并行加载、局部失败隔离、排序 / 去重 / 截断 | 任何写操作 |
 | `models` | serde 数据模型（config / note / todo / github） | 任何 IO |
@@ -162,6 +163,7 @@ sequenceDiagram
 ```text
 MayDolist/
 ├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度
+├── backups/                 # 时间戳命名的本地备份 ZIP（保留最近 10 份）
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
 ├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；系统列表用 kind 标记
 └── github/
@@ -201,6 +203,27 @@ MayDolist/
 - **兼容 schema 升级**：新增配置字段提供 serde 默认值。加载旧 `config.json` 时保留原主题、快捷键、热角和数据目录，补齐新字段、升级 `schemaVersion` 并回写；只有 JSON 损坏或结构不可恢复时才隔离备份。
 - **范围校验与容错**：`settings_update` 拒绝写入越界透明度；加载时对越界值做 clamp（`0.4..=1.0`）并回写，容忍手工编辑导致的错误值。
 - **多窗口应用**：主面板与每个悬浮便签窗读取对应透明度配置，通过 `settings-changed` 事件广播同步。
+
+### 5.5 数据包（导出 / 备份）格式
+
+导出与「创建备份」产物为同一 ZIP 包格式，包内布局如下：
+
+```text
+maydolist-export-YYYYMMDD-HHMMSS.zip
+├── manifest.json            # packageSchemaVersion / appVersion / createdAt / tool / summary
+├── config.json              # 完整配置（导入时 dataDir 会被改写为当前数据目录）
+├── notes/<id>.json          # 便签（原样文件）
+├── todos/<id>.json          # 待办列表（原样文件）
+└── github/
+    ├── watchlist.json       # 追踪列表（filters / signalFilters / ignored / pinned）
+    └── cache/<repo>.json    # 可重建快照缓存（导出可选，恢复不依赖）
+```
+
+- 包格式用独立 `packageSchemaVersion`（当前 `1`）管理，不直接复用单文件 `schemaVersion`；未来格式变化通过版本号 + 迁移函数演进。
+- 导出包包含 config、Todo、Note、GitHub watchlist 与（可选）GitHub cache；**不包含** `logs/`、`backups/`、gh token、认证文件或任何环境变量。
+- 导入前在临时 / 同卷 staging 目录完成校验：manifest 版本兼容、路径安全（拒绝绝对路径、`..` 穿越、反斜杠变体、驱动器符）、重复条目、核心 JSON 可解析；校验失败不修改当前数据。
+- 可重建的 `github/cache` 为降级数据：单文件损坏时跳过并计数提示，不影响核心恢复；缺失 cache 恢复后仍可通过 gh CLI 刷新。
+- 「创建备份」写入 `<数据目录>/backups/maydolist-backup-<时间戳>.zip` 并轮转保留最近 10 份；导入前自动创建当前数据的完整备份，导入失败时原数据仍可通过该备份恢复。
 
 ## 6. 关键流程
 
@@ -257,6 +280,17 @@ MayDolist/
 - Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
 - MVP 不引入日历与截止日期；「今日」仅基于未完成、置顶、最近更新等现有字段，截止日期另行演进。
 
+### 6.7 备份 / 导入 / 恢复
+
+- **导出数据**：设置页「导出数据」经 Windows 原生保存对话框选择目标路径，写入 `maydolist-export-<时间戳>.zip`（不含任何登录凭据）；「包含 GitHub 缓存」开关控制是否附带可重建的 `github/cache`。
+- **创建备份**：设置页「创建备份」在 `<数据目录>/backups/` 下生成时间戳命名的 ZIP（内容同导出，固定包含缓存），并轮转只保留最近 10 份；「最近备份」列表展示时间、大小与位置。
+- **导入数据**：先选包 → 后端校验并返回内容概览（包格式版本、导出应用版本、便签 / 待办 / 缓存计数）→ 前端弹覆盖确认 → 确认后先自动备份当前数据，再执行导入；失败时原数据与配置保持可用。
+- **导入原子性**：校验在 staging 目录完成；通过后进入「备份当前数据 → 持有写锁交换 config.json / notes/ / todos/ / github/ → 成功清理 aside 副本」的流程，交换中途失败会逐项回滚，不产生半套数据；`logs/` 与 `backups/` 不受交换影响。
+- **导入后**：广播 `settings-changed` 与 `entity-changed`（todo / note / github），各窗口立即刷新；导入包的 `config.json` 中 `dataDir` 被改写为当前数据目录，schema 在加载时经既有迁移补齐。
+- **版本兼容**：只接受 `packageSchemaVersion <= 当前版本`；更高的未知版本明确拒绝并提示，不静默丢弃字段；包内旧 schema 的实体复用现有 serde 默认值迁移。
+- **打开数据目录**：设置页按钮调用系统资源管理器打开当前数据目录，便于手动查看 / 复制备份。
+- **日志**：导出、导入、创建备份与打开目录均记录关键操作日志（路径与计数），日志不写入文件内容、gh token 或认证信息。
+
 ## 7. 并发与一致性
 
 - **单写者**：所有文件写入由 Rust 单进程串行化（Mutex），避免多窗口并发写冲突。
@@ -269,6 +303,7 @@ MayDolist/
 
 - **Tauri capabilities 最小化授权**：只授予前端必需能力，前端无文件系统访问权限。
 - **GitHub 凭据**：仅由 gh CLI 持有，应用不读取、不存储 token。
+- **导出包安全**：数据包只含用户数据与可重建缓存，不含 token / 认证文件 / 环境变量；导入包按白名单布局 + 路径安全校验 + 版本校验，恶意包无法写穿数据目录。
 - **GitHub 权限面**：应用只调用 gh CLI 的只读接口（`user`、`search/issues`、`repos/{repo}/issues`、`pulls`、`commits/{sha}/status`、`check-runs`），不创建 / 合并 / 评论；所需 scope 由 gh CLI 登录时授予（经典 token 需 `repo` 或公开仓库只读权限），应用不向 GitHub 发起写操作。
 - **外链一律系统浏览器打开**：不内嵌浏览器，降低凭据与 XSS 暴露面。
 - **默认 CSP**：为前端页面设置合理 CSP，禁止不安全的内联执行与外部资源加载。
@@ -281,6 +316,8 @@ MayDolist/
 | 网络失败 / 离线 | 展示上次缓存快照并提示「刷新失败」 |
 | JSON 文件损坏 | 隔离损坏文件（备份后重建），避免整个数据目录不可用 |
 | 写盘失败（磁盘满 / 权限） | 保留原文件不覆盖，向 UI 返回错误并记录日志 |
+| 导入包损坏 / 版本过高 / 含非法路径 | 校验阶段拒绝并明确报错，不修改当前数据；导入前自动备份仍可用 |
+| 导入交换失败 | 逐项回滚原文件；日志记录失败原因，原数据可用 |
 | 本地日志 | 记录关键错误（写入、gh 调用、窗口创建），便于排查 |
 
 ## 10. 验收标准

@@ -1,10 +1,12 @@
 use std::sync::Arc;
+pub mod backup;
 pub mod focus;
 pub mod github;
 pub mod note;
 pub mod todo;
 use crate::storage::Storage;
 pub struct Services {
+    pub backup: Arc<backup::BackupService>,
     pub todo: Arc<todo::TodoService>,
     pub note: Arc<note::NoteService>,
     pub github: Arc<github::GithubService>,
@@ -12,10 +14,12 @@ pub struct Services {
 }
 impl Services {
     pub fn new(storage: Arc<Storage>) -> Self {
+        let backup = Arc::new(backup::BackupService::new(storage.clone()));
         let todo = Arc::new(todo::TodoService::new(storage.clone()));
         let note = Arc::new(note::NoteService::new(storage.clone()));
         let github = Arc::new(github::GithubService::new(storage));
         Self {
+            backup,
             focus: Arc::new(focus::FocusService::new(
                 todo.clone(),
                 note.clone(),
