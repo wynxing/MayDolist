@@ -53,7 +53,7 @@ pub fn quick_capture_submit(
             let item = state
                 .services
                 .todo
-                .create_item(&list.id, content.to_string())?;
+                .create_item(&list.id, content.to_string(), None)?;
             emit_entity_changed(&app, "todoItem", &item.id, "created")?;
             Ok(QuickCaptureResult {
                 kind: "todo".into(),

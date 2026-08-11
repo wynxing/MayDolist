@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::TodoSource;
+
 /// Per-section load state of the Focus read-only projection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -19,6 +21,9 @@ pub struct FocusTodo {
     /// True when the owning list is the system capture inbox (`kind=inbox`).
     pub inbox: bool,
     pub updated_at: String,
+    /// Optional external source (GitHub PR / issue) for the "open source"
+    /// action in the Focus view; `None` for plain todos.
+    pub source: Option<TodoSource>,
 }
 
 /// One pinned or recently-updated Note shown in the Focus view.

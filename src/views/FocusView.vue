@@ -6,6 +6,7 @@ import { useGithubStore } from "../stores/github";
 import { useNoteStore } from "../stores/note";
 import { useTodoStore } from "../stores/todo";
 import type { FocusGithub, FocusNote, FocusSection, FocusTodo } from "../types/focus";
+import type { TodoSource } from "../types/todo";
 
 const emit = defineEmits<{ navigate: [tab: string] }>();
 
@@ -70,6 +71,21 @@ function completeTodo(item: FocusTodo) {
     await todo.toggleItem(item.id, false);
     void focus.refresh();
   });
+}
+
+function todoSourceLabel(source: TodoSource) {
+  const kind =
+    source.type === "github-pr" ? "PR" : source.type === "github-issue" ? "Issue" : source.type;
+  return `${kind} ${source.repo}#${source.number}`;
+}
+
+function isHttpUrl(url: string) {
+  return /^https?:\/\//i.test(url);
+}
+
+function openTodoSource(item: FocusTodo) {
+  if (!item.source || !isHttpUrl(item.source.url)) return;
+  void runAction(() => github.open(item.source!.url));
 }
 
 function openNote(item: FocusNote) {
@@ -166,7 +182,19 @@ function formatTime(iso: string) {
                 <small class="focus-item-meta" :class="{ inbox: item.inbox }">
                   {{ item.inbox ? "收件箱" : item.listTitle }}
                 </small>
+                <small v-if="item.source" class="focus-item-source" :title="item.source.url">
+                  {{ todoSourceLabel(item.source) }}
+                </small>
               </div>
+              <button
+                v-if="item.source && isHttpUrl(item.source.url)"
+                class="btn ghost compact"
+                type="button"
+                :title="`在浏览器打开来源 ${item.source.url}`"
+                @click="openTodoSource(item)"
+              >
+                打开来源
+              </button>
             </li>
           </ul>
           <p v-else-if="!todoSection?.error" class="focus-empty">暂无未完成待办</p>

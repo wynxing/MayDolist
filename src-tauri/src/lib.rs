@@ -78,6 +78,7 @@ pub fn run() {
             commands::todo::todo_update_list,
             commands::todo::todo_reorder_lists,
             commands::todo::todo_create_item,
+            commands::todo::todo_create_from_github,
             commands::todo::todo_update_item,
             commands::todo::todo_move_item,
             commands::todo::todo_reorder_items,

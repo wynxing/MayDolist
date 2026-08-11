@@ -1,3 +1,5 @@
+import type { TodoSource } from "./todo";
+
 /** Mirrors Rust `models::focus::FocusSectionState`. */
 export type FocusSectionState = "ready" | "error";
 
@@ -9,6 +11,8 @@ export interface FocusTodo {
   listTitle: string;
   inbox: boolean;
   updatedAt: string;
+  /** Optional GitHub source; `null` for plain todos. */
+  source: TodoSource | null;
 }
 
 /** One pinned or recently-updated Note in the Focus projection. */

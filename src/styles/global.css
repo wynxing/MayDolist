@@ -1659,3 +1659,51 @@ textarea.input {
     grid-template-columns: 1fr;
   }
 }
+
+/* #19: GitHub -> Todo source badge and convert feedback */
+.todo-source {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.gh-convert {
+  flex: none;
+  font-size: 12px;
+  padding: 6px 10px;
+  color: var(--accent);
+}
+
+.gh-convert:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gh-convert-ok {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-self: center;
+  color: var(--ok, #2e8b57);
+  font-size: 11px;
+}
+
+.gh-convert-error {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-self: center;
+  margin: 0;
+  font-size: 11px;
+}

@@ -10,4 +10,4 @@ pub use focus::{
 };
 pub use github::{GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
 pub use note::{Note, WindowBounds};
-pub use todo::{TodoItem, TodoList};
+pub use todo::{TodoItem, TodoList, TodoSource};

@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useGithubStore } from "../stores/github";
+import { useTodoStore } from "../stores/todo";
 import type { GhIssue, GhPullRequest, RepoSnapshot, RepoWatch } from "../types/github";
 
 const s = useGithubStore();
+const todo = useTodoStore();
 const repo = ref("");
 const busy = ref(false);
 const pinDrafts = reactive<Record<string, string>>({});
 const pinBusy = reactive<Record<string, boolean>>({});
 const pinErrors = reactive<Record<string, string | null>>({});
+const convertState = reactive<
+  Record<string, { phase: "idle" | "saving" | "ok" | "error"; message: string }>
+>({});
 
 const filters = [
   ["mine", "我的"],
@@ -144,6 +149,51 @@ function pinKey(repoName: string, e: KeyboardEvent) {
 function isClosed(state: string) {
   return state !== "open";
 }
+
+function convertKey(repoName: string, kind: string, number: number) {
+  return `${repoName}:${kind}:${number}`;
+}
+
+async function convertToTodo(
+  repoName: string,
+  kind: "pr" | "issue",
+  item: { number: number; title: string; url: string },
+) {
+  const key = convertKey(repoName, kind, item.number);
+  // Ignore rapid double-clicks while a request is in flight.
+  if (convertState[key]?.phase === "saving") return;
+  convertState[key] = { phase: "saving", message: "" };
+  try {
+    const result = await todo.createFromGithub({
+      kind: kind === "pr" ? "github-pr" : "github-issue",
+      repo: repoName,
+      number: item.number,
+      title: item.title,
+      url: item.url,
+    });
+    convertState[key] = { phase: "ok", message: `已转为 Todo：${result.title}` };
+    window.setTimeout(() => {
+      if (convertState[key]?.phase === "ok") {
+        convertState[key] = { phase: "idle", message: "" };
+      }
+    }, 4000);
+  } catch (err) {
+    convertState[key] = { phase: "error", message: String(err) };
+    window.setTimeout(() => {
+      if (convertState[key]?.phase === "error") {
+        convertState[key] = { phase: "idle", message: "" };
+      }
+    }, 6000);
+  }
+}
+
+function convertLabel(key: string) {
+  const state = convertState[key];
+  if (state?.phase === "saving") return "保存中…";
+  if (state?.phase === "ok") return "已转入";
+  if (state?.phase === "error") return "重试";
+  return "转为 Todo";
+}
 </script>
 
 <template>
@@ -238,6 +288,29 @@ function isClosed(state: string) {
               <small>{{ matchLabel(pr.matches) }}</small>
             </button>
             <button
+              class="btn ghost gh-convert"
+              type="button"
+              title="转为 Todo（收件箱）"
+              :disabled="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'saving'"
+              @click="convertToTodo(watch.fullName, 'pr', pr)"
+            >
+              {{ convertLabel(convertKey(watch.fullName, 'pr', pr.number)) }}
+            </button>
+            <small
+              v-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'ok'"
+              class="gh-convert-ok"
+              :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
+            >
+              {{ convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message }}
+            </small>
+            <small
+              v-else-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'"
+              class="error gh-convert-error"
+              :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
+            >
+              {{ convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message }}
+            </small>
+            <button
               class="btn ghost gh-ignore"
               type="button"
               title="忽略"
@@ -259,6 +332,29 @@ function isClosed(state: string) {
               <span>#{{ issue.number }} {{ issue.title }}</span>
               <small>{{ matchLabel(issue.matches) }}</small>
             </button>
+            <button
+              class="btn ghost gh-convert"
+              type="button"
+              title="转为 Todo（收件箱）"
+              :disabled="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'saving'"
+              @click="convertToTodo(watch.fullName, 'issue', issue)"
+            >
+              {{ convertLabel(convertKey(watch.fullName, 'issue', issue.number)) }}
+            </button>
+            <small
+              v-if="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'ok'"
+              class="gh-convert-ok"
+              :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
+            >
+              {{ convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message }}
+            </small>
+            <small
+              v-else-if="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'error'"
+              class="error gh-convert-error"
+              :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
+            >
+              {{ convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message }}
+            </small>
             <button
               class="btn ghost gh-ignore"
               type="button"
