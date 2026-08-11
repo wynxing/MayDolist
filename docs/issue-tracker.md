@@ -9,12 +9,12 @@
 
 | Issue | 标题 | 依赖 | 状态 | 分支 | PR | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
+| #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 进行中 | - | - | 最后收尾 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
 | #20 | GitHub 可行动信号 | #18/#19 | ✅ 已完成 | `codex/issue-20-action-signals` | [#25](https://github.com/wynxing/MayDolist/pull/25) | CI 绿 + 已合并 + issue 自动关闭 |
-| #21 | 备份 / 导入 / 恢复 | 无 | 进行中 | - | - | activeThreadId: `019ff1ad-8212-7380-b82b-6855de03857f`（worktree） |
+| #21 | 备份 / 导入 / 恢复 | 无 | ✅ 已完成 | `codex/issue-21-backup-restore` | [#26](https://github.com/wynxing/MayDolist/pull/26) | CI 绿 + 已合并 + issue 自动关闭 |
 
 ## 验收清单（#17 快速收集入口与 Inbox）
 
@@ -70,6 +70,20 @@
 - [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 62 passed）
 - [x] PR [#25](https://github.com/wynxing/MayDolist/pull/25) 合并（merge commit `9d127fa`），issue #20 已自动关闭
 
+## 验收清单（#21 备份 / 导入 / 恢复）
+
+- [x] 定义导出包格式、版本字段和目录布局，并记录在架构文档中（§5.5 + README「数据备份与恢复」）
+- [x] 增加 Rust export / import / backup service，复用现有原子写和损坏隔离能力（`storage::replace_domain` 持锁原子交换 + 失败逐项回滚）
+- [x] 增加导入包校验、路径安全校验和版本兼容策略（manifest 版本拒绝、白名单布局、路径穿越 / 重复 / 非法 JSON 拒绝）
+- [x] 按需接入 Windows 原生文件选择 / 保存对话框，并补充最小 capability（tauri-plugin-dialog + `dialog:default`）
+- [x] 在 SettingsView 增加导出、导入、备份、打开数据目录和最近备份信息（「数据安全」区块 + 成功 / 失败反馈）
+- [x] 导入前提供覆盖提示；导入失败时保持原数据和原配置可用（预览确认 → 自动备份 → 原子替换 / 回滚）
+- [x] 记录关键操作日志，但日志中不得写入 GitHub token 或完整私密路径以外的敏感内容（只记录路径与计数）
+- [x] 更新 README、架构文档和恢复操作说明
+- [x] 测试与验证：导出 / 导入完整往返、备份轮转保留 10 份、空包导入、路径穿越 / 重复条目 / 非法 JSON / 版本过高拒绝、损坏 cache 降级跳过、原子替换回滚（cargo test 76 passed）
+- [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy -D warnings、cargo test 76 passed）
+- [x] PR [#26](https://github.com/wynxing/MayDolist/pull/26) 合并（merge commit `c614c9e`），issue #21 已自动关闭
+
 ## 交接记录
 
 ### 自动化编排启动（2026-08-11）
@@ -100,3 +114,9 @@
 - 完成证据：PR #25（CI 2m56s 全绿）→ squash 合并（merge commit `9d127fa`）→ issue #20 自动关闭。
 - 实现要点：稳定 `ActionSignal` 枚举与徽标（需要我处理 / 需要 Review / CI 失败 / 长期未更新 / Draft）；PR 详情 + checks 枚举（未变化 PR 复用缓存详情）；RepoSnapshot 信号字段全向后兼容；行动信号过滤（默认关闭保持旧列表）；全部刷新串行 + 同仓库并发去重 + 单仓库失败不清空其他仓库；Focus 只聚合带可行动信号的 open 条目；`githubStaleDays` 可配置（默认 14 天）。cargo test 62 passed。
 - 下一轮：#21 备份 / 导入 / 恢复，线程已即时创建（threadId `019ff1ad-8212-7380-b82b-6855de03857f`，worktree `C:\Users\wynn\.codex\worktrees\1fe5\MayDolist`），开场指令见本轮交接摘要。
+
+### 轮次 5（#21，已完成）
+
+- 完成证据：PR #26（CI 3m56s 全绿）→ squash 合并（merge commit `c614c9e`）→ issue #21 自动关闭。
+- 实现要点：ZIP 数据包（`manifest.json` `packageSchemaVersion=1` + config / notes / todos / watchlist + 可选 cache，不含 logs / backups / 凭据）；导入「预览确认 → 自动备份当前数据 → 同卷 staging 校验 → 持锁原子交换（失败逐项回滚）→ 广播 settings-changed + entity-changed」；路径安全 / 版本 / 重复 / 非法 JSON 拒绝，损坏 cache 跳过降级；设置页「数据安全」（导出 / 导入 / 备份 / 打开数据目录 / 最近备份，轮转保留 10 份）；tauri-plugin-dialog + `dialog:default`；日志不写文件内容与凭据。cargo test 76 passed。
+- 下一轮：#16 RFC：演进为开发者行动收件箱（全部实现已就绪，最后收尾项），线程待创建者即时创建并回写 activeThreadId。
