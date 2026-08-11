@@ -43,7 +43,7 @@ pub fn settings_update(
 ) -> AppResult<AppConfig> {
     let config = sanitize_config(config);
     validate_glass_opacity(&config)?;
-    crate::app::register_hotkey(&app, &config.hotkey)?;
+    crate::app::apply_hotkeys(&app, &config)?;
     state.storage.save_config(&config)?;
     app.emit("settings-changed", config.clone())
         .map_err(|e| AppError::Internal(e.to_string()))?;

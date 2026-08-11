@@ -123,6 +123,23 @@ async function clearTrash() {
         </label>
 
         <label class="settings-row">
+          <span>快速收集快捷键</span>
+          <input
+            v-model="settings.config.quickCaptureHotkey"
+            class="input settings-control"
+            :disabled="!settings.config.quickCaptureEnabled"
+          />
+        </label>
+
+        <div class="settings-row">
+          <span>快速收集</span>
+          <label class="settings-switch">
+            <input v-model="settings.config.quickCaptureEnabled" type="checkbox" />
+            <span>启用快速收集窗口（默认 Ctrl+Alt+Space）</span>
+          </label>
+        </div>
+
+        <label class="settings-row">
           <span>
             GitHub 刷新间隔
             <small>分钟，0 为关闭</small>

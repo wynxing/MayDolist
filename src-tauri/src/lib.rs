@@ -90,6 +90,8 @@ pub fn run() {
             commands::note::note_show_floating,
             commands::note::note_dock,
             commands::note::note_update_window_state,
+            commands::quick_capture::quick_capture_submit,
+            commands::quick_capture::quick_capture_hide,
             commands::trash::trash_list,
             commands::trash::trash_restore,
             commands::trash::trash_delete_permanently,

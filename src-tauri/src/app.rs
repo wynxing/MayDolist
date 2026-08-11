@@ -1,6 +1,6 @@
 use crate::{
     error::{AppError, AppResult},
-    models::{Note, WindowBounds},
+    models::{AppConfig, Note, WindowBounds},
     AppState,
 };
 use std::str::FromStr;
@@ -15,7 +15,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 pub fn setup(app: &mut tauri::App) -> AppResult<()> {
     let handle = app.handle().clone();
     let config = app.state::<AppState>().storage.load_config()?;
-    register_hotkey(&handle, &config.hotkey)?;
+    apply_hotkeys(&handle, &config)?;
     build_tray(&handle)?;
     if std::env::args().any(|v| v == "--autostart") {
         if let Some(window) = app.get_webview_window("main") {
@@ -68,25 +68,59 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
     Ok(())
 }
 
-pub fn register_hotkey(app: &AppHandle, value: &str) -> AppResult<()> {
-    let shortcut = Shortcut::from_str(value)
+/// Register the main panel and quick capture global hotkeys from the config.
+/// Both shortcuts are parsed before anything is unregistered, so an invalid
+/// value never disables a working hotkey. The quick capture hotkey is only
+/// registered when `quick_capture_enabled` is true.
+pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
+    let main_shortcut = Shortcut::from_str(&config.hotkey)
         .map_err(|e| AppError::InvalidInput(format!("invalid hotkey: {e}")))?;
+    let quick_shortcut = if config.quick_capture_enabled {
+        if config.quick_capture_hotkey.trim().is_empty() {
+            return Err(AppError::InvalidInput(
+                "quick capture hotkey must not be empty".into(),
+            ));
+        }
+        if config.quick_capture_hotkey.trim() == config.hotkey.trim() {
+            return Err(AppError::InvalidInput(
+                "quick capture hotkey conflicts with the main panel hotkey".into(),
+            ));
+        }
+        Some(
+            Shortcut::from_str(&config.quick_capture_hotkey)
+                .map_err(|e| AppError::InvalidInput(format!("invalid hotkey: {e}")))?,
+        )
+    } else {
+        None
+    };
     app.global_shortcut()
         .unregister_all()
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let handle = app.clone();
     app.global_shortcut()
-        .on_shortcut(shortcut, move |_app, _shortcut, event| {
+        .on_shortcut(main_shortcut, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 toggle_main(&handle).ok();
             }
         })
         .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
+    if let Some(shortcut) = quick_shortcut {
+        let handle = app.clone();
+        app.global_shortcut()
+            .on_shortcut(shortcut, move |_app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    show_quick_capture(&handle).ok();
+                }
+            })
+            .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
+    }
     Ok(())
 }
 
 fn build_tray(app: &AppHandle) -> AppResult<()> {
     let toggle = MenuItem::with_id(app, "toggle", "显示/隐藏 MayDolist", true, None::<&str>)
+        .map_err(internal)?;
+    let quick_capture = MenuItem::with_id(app, "quick-capture", "快速收集", true, None::<&str>)
         .map_err(internal)?;
     let new_note =
         MenuItem::with_id(app, "new-note", "新建便签", true, None::<&str>).map_err(internal)?;
@@ -95,8 +129,18 @@ fn build_tray(app: &AppHandle) -> AppResult<()> {
     let settings =
         MenuItem::with_id(app, "settings", "设置", true, None::<&str>).map_err(internal)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>).map_err(internal)?;
-    let menu = Menu::with_items(app, &[&toggle, &new_note, &refresh, &settings, &quit])
-        .map_err(internal)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &toggle,
+            &quick_capture,
+            &new_note,
+            &refresh,
+            &settings,
+            &quit,
+        ],
+    )
+    .map_err(internal)?;
     let handle = app.clone();
     TrayIconBuilder::new()
         .menu(&menu)
@@ -104,6 +148,9 @@ fn build_tray(app: &AppHandle) -> AppResult<()> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "toggle" => {
                 toggle_main(app).ok();
+            }
+            "quick-capture" => {
+                show_quick_capture(app).ok();
             }
             "new-note" => {
                 show_main(app).ok();
@@ -159,6 +206,29 @@ pub fn toggle_main(app: &AppHandle) -> AppResult<()> {
         w.show().map_err(internal)?;
         w.set_focus().map_err(internal)
     }
+}
+
+pub const QUICK_CAPTURE_WINDOW: &str = "quick-capture";
+
+/// Show (and focus) the quick capture window, then tell the view to focus the
+/// input. The window itself is declared hidden in tauri.conf.json so this only
+/// ever reuses an already-created webview.
+pub fn show_quick_capture(app: &AppHandle) -> AppResult<()> {
+    let window = app
+        .get_webview_window(QUICK_CAPTURE_WINDOW)
+        .ok_or_else(|| AppError::NotFound("quick capture window".into()))?;
+    apply_acrylic(&window);
+    window.show().map_err(internal)?;
+    window.set_focus().map_err(internal)?;
+    app.emit_to(QUICK_CAPTURE_WINDOW, "quick-capture-open", ())
+        .map_err(internal)
+}
+
+pub fn hide_quick_capture(app: &AppHandle) -> AppResult<()> {
+    if let Some(window) = app.get_webview_window(QUICK_CAPTURE_WINDOW) {
+        window.hide().map_err(internal)?;
+    }
+    Ok(())
 }
 
 pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {

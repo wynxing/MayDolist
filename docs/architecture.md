@@ -63,6 +63,7 @@ flowchart TB
     subgraph UI["Vue 3 + TS 前端层"]
         Main["主面板（Todo / 便签 / GitHub / 设置）"]
         Note["悬浮便签窗（可多开）"]
+        Quick["快速收集窗（轻量输入）"]
     end
 
     subgraph Rust["Rust 系统层（Tauri 2）"]
@@ -143,7 +144,7 @@ sequenceDiagram
 
 | 模块 | 职责 |
 | --- | --- |
-| `views` | 主面板视图（Todo / 便签 / GitHub / 设置）与悬浮便签窗 |
+| `views` | 主面板视图（Todo / 便签 / GitHub / 设置）、悬浮便签窗与快速收集窗 |
 | `stores` | Pinia 状态管理，维护 UI 状态与缓存数据 |
 | `api` | `invoke` 封装层，前端唯一的数据访问入口 |
 | `components` | 可复用 UI 组件（卡片、列表、标签、窗口控制等） |
@@ -161,7 +162,7 @@ sequenceDiagram
 MayDolist/
 ├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
-├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态
+├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；系统列表用 kind 标记
 └── github/
     ├── watchlist.json       # 追踪仓库：filters / collapsed / ignored / pinned
     └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt（可重建）
@@ -174,6 +175,7 @@ MayDolist/
 - `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
 - `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
 - `config.json` 为单例配置，不采用实体文件形式。
+- 系统列表（如快速收集的「收件箱」）通过 `kind` 字段标记（`kind=inbox`）；旧数据无该字段时按普通列表读取，兼容不破坏。
 
 ### 5.3 写入策略
 
@@ -187,6 +189,7 @@ MayDolist/
 
 - `mainWindowGlassOpacity`：主面板玻璃背景层 alpha，范围 `0.4..=1.0`。
 - `floatingNoteGlassOpacity`：悬浮便签玻璃背景层 alpha，范围 `0.4..=1.0`。
+- `quickCaptureHotkey` / `quickCaptureEnabled`：快速收集窗的全局快捷键与启用开关，默认 `Ctrl+Alt+Space` / `true`；与主面板快捷键冲突或格式非法时在保存设置时报错，不写入。
 
 相关规则：
 
@@ -209,6 +212,8 @@ MayDolist/
 - 默认热角：右上角；默认全局快捷键：`Ctrl+Alt+M`。
 - 托盘图标常驻，点击切换主面板显示 / 隐藏。
 - 主面板隐藏时不退出进程，保持托盘与后台刷新能力。
+- 快速收集：默认 `Ctrl+Alt+Space`（或托盘「快速收集」）呼出轻量窗口；输入默认创建 Todo 到「收件箱」，前缀 `note:` 创建便签；Enter 保存成功后隐藏并清空，Esc 直接隐藏，失败时保留输入并显示错误。
+- 「收件箱」为系统列表：优先按 `kind=inbox` 稳定标记查找，其次采用同名（「收件箱」）旧列表并补记标记，均不存在时才创建，保证幂等不重复。
 
 ### 6.3 Todo
 
