@@ -1184,6 +1184,51 @@ textarea.input {
   flex-shrink: 0;
 }
 
+.data-actions {
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.data-message {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.backup-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.backup-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.backup-meta {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .trash-heading {
   display: flex;
   align-items: center;

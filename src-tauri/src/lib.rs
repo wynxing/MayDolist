@@ -37,6 +37,7 @@ pub fn run() {
             app::show_main(app).ok();
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
@@ -62,6 +63,12 @@ pub fn run() {
             log,
         })
         .invoke_handler(tauri::generate_handler![
+            commands::backup::backup_export,
+            commands::backup::backup_inspect,
+            commands::backup::backup_import,
+            commands::backup::backup_create,
+            commands::backup::backup_list,
+            commands::backup::backup_open_data_dir,
             commands::config::get_config,
             commands::config::get_data_dir,
             commands::config::set_config,
