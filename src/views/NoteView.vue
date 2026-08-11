@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { consumePendingNoteId, pendingNoteId } from "../navigation";
 import { useNoteStore } from "../stores/note";
 
 const store = useNoteStore();
@@ -22,7 +23,36 @@ const shown = computed(() => store.notes.filter((note) => {
 }));
 const allTags = computed(() => [...new Set(store.notes.flatMap((note) => note.tags))].sort());
 
-onMounted(() => store.init());
+onMounted(async () => {
+  await store.init();
+  // The Focus view may hand us a note id to open (before the tab mounts).
+  watch(
+    pendingNoteId,
+    (id) => {
+      if (!id) return;
+      consumePendingNoteId();
+      selectPending(id);
+    },
+    { immediate: true }
+  );
+});
+
+function selectPending(id: string) {
+  if (store.notes.some((note) => note.id === id)) {
+    choose(id);
+    return;
+  }
+  const stop = watch(
+    () => store.notes,
+    (notes) => {
+      if (notes.some((note) => note.id === id)) {
+        choose(id);
+        stop();
+      }
+    },
+    { deep: true }
+  );
+}
 
 async function applyNote(note: { title: string; content: string; tags: string[] }) {
   applyingRemote = true;
