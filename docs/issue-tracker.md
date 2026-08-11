@@ -8,8 +8,8 @@
 | Issue | 标题 | 依赖 | 状态 | 分支 | PR | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
-| #17 | 快速收集入口与 Inbox | 无 | 进行中 | `codex/issue-17-quick-capture` | - | 本轮 |
-| #18 | Focus 统一视图 | #17 | 待做 | - | - | 下一轮 |
+| #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
+| #18 | Focus 统一视图 | #17 | 待做（下一轮） | - | - | |
 | #19 | GitHub 条目转 Todo | #17/#18 | 待做 | - | - | |
 | #20 | GitHub 可行动信号 | #18/#19 | 待做 | - | - | |
 | #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
@@ -24,11 +24,13 @@
 - [x] 托盘菜单新增「快速收集」入口
 - [x] 文档更新（architecture.md / README.md）
 - [x] 单元测试：config 迁移、前缀解析、ensure_inbox、kind 序列化
-- [ ] 全量校验 + PR 合并 + issue #17 关闭（待本轮完成）
+- [x] 全量校验全绿（pnpm check/build、cargo fmt/clippy/test 34 passed）
+- [x] PR [#22](https://github.com/wynxing/MayDolist/pull/22) 合并（merge commit `ddfd778`），issue #17 已自动关闭
 
 ## 交接记录
 
-### 轮次 1（#17，进行中）
+### 轮次 1（#17，已完成）
 
 - 工作区注意：恢复源码后 `git add -- src src-tauri public` 刷新了 stat 缓存（内容无变化）；未跟踪文件 `liquid-glass-*.png` 保留不动，不入提交。
-- 下一个 issue：#18 Focus 统一视图（依赖 #17）。
+- 完成证据：PR #22（CI 2m53s 全绿）→ squash 合并 → issue #17 自动关闭。
+- 下一轮：#18 Focus 统一视图（依赖 #17），开场指令见上一轮对话结尾。
