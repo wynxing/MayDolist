@@ -1,9 +1,10 @@
 use crate::{
     error::AppResult,
     events::emit_entity_changed,
-    models::{TodoItem, TodoList},
+    models::{TodoItem, TodoList, TodoSource},
     AppState,
 };
+use serde::Serialize;
 use tauri::{AppHandle, State};
 #[tauri::command]
 pub fn todo_list(
@@ -50,10 +51,53 @@ pub fn todo_create_item(
     app: AppHandle,
     list_id: String,
     title: String,
+    source: Option<TodoSource>,
 ) -> AppResult<TodoItem> {
-    let v = state.services.todo.create_item(&list_id, title)?;
+    let v = state.services.todo.create_item(&list_id, title, source)?;
     emit_entity_changed(&app, "todoItem", &v.id, "created")?;
     Ok(v)
+}
+
+/// Result of converting a GitHub issue / PR into a Todo. `source_type` is the
+/// source kind (`"github-pr"` / `"github-issue"`) and `target_list_id` is the
+/// inbox list the item landed in.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoFromGithubResult {
+    pub source_type: String,
+    pub id: String,
+    pub title: String,
+    pub repo: String,
+    pub number: u64,
+    pub target_list_id: String,
+}
+
+/// Create a Todo from a GitHub issue / PR. The item always lands in the
+/// capture inbox (idempotent `ensure_inbox`); only the Todo domain is
+/// touched, so GitHub cache, auth and network state are never modified.
+#[tauri::command]
+pub fn todo_create_from_github(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    kind: String,
+    repo: String,
+    number: u64,
+    title: String,
+    url: String,
+) -> AppResult<TodoFromGithubResult> {
+    let (list, item) = state
+        .services
+        .todo
+        .create_item_from_github(&kind, &repo, number, &title, &url)?;
+    emit_entity_changed(&app, "todoItem", &item.id, "created")?;
+    Ok(TodoFromGithubResult {
+        source_type: kind,
+        id: item.id,
+        title: item.title,
+        repo,
+        number,
+        target_list_id: list.id,
+    })
 }
 #[tauri::command]
 pub fn todo_update_item(

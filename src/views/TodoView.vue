@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import EmptyState from "../components/EmptyState.vue";
+import { open } from "../api/github";
 import { useTodoStore } from "../stores/todo";
-import type { TodoItem, TodoList } from "../types/todo";
+import type { TodoItem, TodoList, TodoSource } from "../types/todo";
 
 const store = useTodoStore();
+const actionError = ref("");
 const newList = ref("");
 const drafts = ref<Record<string, string>>({});
 const completedOpen = ref<Record<string, boolean>>({});
@@ -88,6 +90,26 @@ async function deleteList(list: TodoList) {
 async function deleteItem(item: TodoItem) {
   if (!window.confirm(`将待办“${item.title}”移入回收站？`)) return;
   await store.softDelete(item.id);
+}
+
+function sourceLabel(source: TodoSource) {
+  const kind =
+    source.type === "github-pr" ? "PR" : source.type === "github-issue" ? "Issue" : source.type;
+  return `${kind} ${source.repo}#${source.number}`;
+}
+
+function isHttpUrl(url: string) {
+  return /^https?:\/\//i.test(url);
+}
+
+async function openSource(item: TodoItem) {
+  if (!item.source || !isHttpUrl(item.source.url)) return;
+  actionError.value = "";
+  try {
+    await open(item.source.url);
+  } catch (err) {
+    actionError.value = String(err);
+  }
 }
 
 async function moveList(id: string, delta: number) {
@@ -211,6 +233,7 @@ function onItemDragEnd() {
     </header>
 
     <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
+    <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
 
     <div v-if="hasLists" class="todo-groups">
       <article
@@ -311,8 +334,20 @@ function onItemDragEnd() {
             <label v-else class="todo-item-title" :for="`todo-${item.id}`" @dblclick="startItemEdit(item)">
               {{ item.title }}
             </label>
+            <span v-if="item.source" class="todo-source" :title="item.source.url">
+              {{ sourceLabel(item.source) }}
+            </span>
             <div class="todo-item-actions">
               <button class="text-action" type="button" @click="startItemEdit(item)">编辑</button>
+              <button
+                v-if="item.source && isHttpUrl(item.source.url)"
+                class="text-action"
+                type="button"
+                :title="`打开来源 ${item.source.url}`"
+                @click="openSource(item)"
+              >
+                打开来源
+              </button>
               <select
                 class="move-select"
                 :value="list.id"
@@ -381,7 +416,19 @@ function onItemDragEnd() {
                 @change="store.toggleItem(item.id, item.completed)"
               />
               <label class="todo-item-title" :for="`todo-${item.id}`">{{ item.title }}</label>
+              <span v-if="item.source" class="todo-source" :title="item.source.url">
+                {{ sourceLabel(item.source) }}
+              </span>
               <div class="todo-item-actions">
+                <button
+                  v-if="item.source && isHttpUrl(item.source.url)"
+                  class="text-action"
+                  type="button"
+                  :title="`打开来源 ${item.source.url}`"
+                  @click="openSource(item)"
+                >
+                  打开来源
+                </button>
                 <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
               </div>
             </li>

@@ -76,6 +76,17 @@ export const useTodoStore = defineStore("todo", () => {
       }
       return v;
     },
+    createFromGithub: async (input: {
+      kind: string;
+      repo: string;
+      number: number;
+      title: string;
+      url: string;
+    }) => {
+      const v = await api.createFromGithub(input);
+      await refresh();
+      return v;
+    },
     toggleItem: async (id: string, completed: boolean) => {
       const v = await api.updateItem(id, { completed: !completed });
       upsertItem(v);

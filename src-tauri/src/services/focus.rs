@@ -152,6 +152,7 @@ pub fn project_todos(lists: &[TodoList]) -> Vec<FocusTodo> {
                 list_title: list.title.clone(),
                 inbox,
                 updated_at: item.updated_at.clone(),
+                source: item.source.clone(),
             });
         }
     }
@@ -307,6 +308,7 @@ mod tests {
             sort_order: order,
             created_at: "2026-08-01T00:00:00Z".into(),
             updated_at: format!("2026-08-01T00:00:0{order}Z"),
+            source: None,
         }
     }
 
@@ -386,6 +388,28 @@ mod tests {
         assert_eq!(items[0].list_id, "inbox");
         // Completed and deleted items never enter the projection.
         assert!(!items.iter().any(|v| v.id == "i2" || v.id == "d1"));
+    }
+
+    #[test]
+    fn project_todos_carries_github_source() {
+        use crate::models::TodoSource;
+
+        let mut inbox = todo_list("inbox", "收件箱", Some(INBOX_KIND), 0);
+        let mut item = todo_item("s1", "带来源待办", false, 0);
+        item.source = Some(TodoSource {
+            kind: "github-pr".into(),
+            repo: "owner/repo".into(),
+            number: 12,
+            url: "https://github.com/owner/repo/pull/12".into(),
+        });
+        inbox.items = vec![item];
+        let items = project_todos(&[inbox]);
+        assert_eq!(items.len(), 1);
+        let source = items[0].source.clone().expect("source must be projected");
+        assert_eq!(source.kind, "github-pr");
+        assert_eq!(source.repo, "owner/repo");
+        assert_eq!(source.number, 12);
+        assert_eq!(items[0].source.as_ref().unwrap().url, source.url);
     }
 
     #[test]
@@ -527,16 +551,16 @@ mod tests {
         let inbox = services.todo.ensure_inbox().unwrap();
         services
             .todo
-            .create_item(&inbox.id, "收件箱任务".into())
+            .create_item(&inbox.id, "收件箱任务".into(), None)
             .unwrap();
         let work = services.todo.create_list("工作".into()).unwrap();
         services
             .todo
-            .create_item(&work.id, "工作任务".into())
+            .create_item(&work.id, "工作任务".into(), None)
             .unwrap();
         let done = services
             .todo
-            .create_item(&work.id, "已完成".into())
+            .create_item(&work.id, "已完成".into(), None)
             .unwrap();
         services
             .todo
