@@ -12,7 +12,7 @@
 | #16 | RFC：演进为开发者行动收件箱 | 全部实现 | 待做 | - | - | 最后收尾 |
 | #17 | 快速收集入口与 Inbox | 无 | ✅ 已完成 | `codex/issue-17-quick-capture` | [#22](https://github.com/wynxing/MayDolist/pull/22) | CI 绿 + 已合并 |
 | #18 | Focus 统一视图 | #17 | ✅ 已完成 | `codex/issue-18-focus-view` | [#23](https://github.com/wynxing/MayDolist/pull/23) | CI 绿 + 已合并 + issue 自动关闭 |
-| #19 | GitHub 条目转 Todo | #17/#18 | 进行中 | - | - | activeThreadId: 创建中（本轮回写） |
+| #19 | GitHub 条目转 Todo | #17/#18 | 进行中 | - | - | activeThreadId: `019ff151-a86c-70b0-9ce6-96f546f7ab84`（worktree） |
 | #20 | GitHub 可行动信号 | #18/#19 | 待做 | - | - | |
 | #21 | 备份 / 导入 / 恢复 | 无 | 待做 | - | - | |
 
@@ -60,4 +60,4 @@
 ### 轮次 2（#18，已完成）
 
 - 完成证据：PR #23（CI 3m22s 全绿）→ squash 合并（merge commit `8259291`）→ issue #18 自动关闭。
-- 下一轮：#19 GitHub 条目转 Todo（依赖 #17/#18），线程已即时创建（threadId 见 #19 行备注），开场指令见本轮交接摘要。
+- 下一轮：#19 GitHub 条目转 Todo（依赖 #17/#18），线程已即时创建（threadId `019ff151-a86c-70b0-9ce6-96f546f7ab84`，worktree `C:\Users\wynn\.codex\worktrees\2e60\MayDolist`），开场指令见本轮交接摘要。
