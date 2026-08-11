@@ -903,6 +903,13 @@ textarea.input {
   font-size: 11px;
 }
 
+.snapshot-time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  flex: none;
+}
+
 .snapshot-section h4 {
   margin: 10px 0 4px;
   font-size: 12px;
@@ -1285,6 +1292,77 @@ textarea.input {
 .gh-link:hover { background: var(--card-hover); }
 .gh-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-link small { margin-left: auto; color: var(--accent); flex: none; }
+.gh-link .gh-title-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+  overflow: hidden;
+}
+.gh-link .gh-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gh-link .gh-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: visible;
+  white-space: normal;
+}
+.gh-signal-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card-hover);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.gh-signal-badge.needsAction {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
+}
+.gh-signal-badge.needsReview {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+}
+.gh-signal-badge.ciFailed {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+}
+.gh-signal-badge.stale {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+}
+.gh-signal-badge.draft {
+  border-color: var(--border);
+  background: var(--card-hover);
+  color: var(--muted);
+}
+:root[data-theme="light"] .gh-signal-badge.needsAction { color: #15803d; }
+:root[data-theme="light"] .gh-signal-badge.needsReview { color: #1d4ed8; }
+:root[data-theme="light"] .gh-signal-badge.ciFailed { color: #b91c1c; }
+:root[data-theme="light"] .gh-signal-badge.stale { color: #b45309; }
+.gh-signal-label {
+  font-size: 12px;
+  color: var(--muted);
+  align-self: center;
+}
+.gh-clear-signals {
+  margin-left: auto;
+}
+.focus-signal-badge {
+  margin-right: 4px;
+  vertical-align: 1px;
+}
 .gh-accordion-toggle {
   display: flex;
   align-items: baseline;

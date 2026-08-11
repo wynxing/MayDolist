@@ -37,6 +37,10 @@ export const useGithubStore = defineStore("github", () => {
       snapshots.value = await api.refreshAll();
       watchlist.value = await api.watchlist();
     },
+    refreshRepo: async (fullName: string) => {
+      const snap = await api.refreshRepo(fullName);
+      replaceSnapshot(snap);
+    },
     addWatch: async (v: string) => {
       await api.addWatch(v);
       await load();
@@ -47,6 +51,9 @@ export const useGithubStore = defineStore("github", () => {
     },
     setFilters: async (v: string, f: string[]) => {
       watchlist.value = await api.filters(v, f);
+    },
+    setSignalFilters: async (v: string, f: string[]) => {
+      watchlist.value = await api.signalFilters(v, f);
     },
     setCollapsed: async (v: string, collapsed: boolean) => {
       watchlist.value = await api.collapsed(v, collapsed);

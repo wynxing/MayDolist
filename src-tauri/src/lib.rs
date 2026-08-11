@@ -102,6 +102,7 @@ pub fn run() {
             commands::github::github_watch_add,
             commands::github::github_watch_remove,
             commands::github::github_watch_filters,
+            commands::github::github_watch_signal_filters,
             commands::github::github_watch_collapsed,
             commands::github::github_ignore_item,
             commands::github::github_pin_item,

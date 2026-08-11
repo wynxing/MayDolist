@@ -5,6 +5,7 @@ import { useFocusStore } from "../stores/focus";
 import { useGithubStore } from "../stores/github";
 import { useNoteStore } from "../stores/note";
 import { useTodoStore } from "../stores/todo";
+import { signalBadges } from "../signals";
 import type { FocusGithub, FocusNote, FocusSection, FocusTodo } from "../types/focus";
 import type { TodoSource } from "../types/todo";
 
@@ -113,6 +114,10 @@ function githubSource(item: FocusGithub) {
       return found ? found[1] : match;
     })
     .join(" · ");
+}
+
+function githubSignals(item: FocusGithub) {
+  return signalBadges(item.signals);
 }
 
 function formatTime(iso: string) {
@@ -258,9 +263,19 @@ function formatTime(iso: string) {
               <button class="focus-item-main" type="button" @click="openGithub(item)">
                 <span class="focus-item-title" :title="item.title">
                   <span class="focus-badge" :class="item.kind">{{ githubBadge(item) }}</span>
+                  <span
+                    v-for="b in githubSignals(item)"
+                    :key="b.key"
+                    class="gh-signal-badge focus-signal-badge"
+                    :class="b.key"
+                  >
+                    {{ b.label }}
+                  </span>
                   {{ item.pinned ? "📌 " : "" }}#{{ item.number }} {{ item.title }}
                 </span>
-                <small class="focus-item-meta">{{ item.repo }} · {{ formatTime(item.updatedAt) }}</small>
+                <small class="focus-item-meta">
+                  {{ item.repo }} · 更新 {{ formatTime(item.updatedAt) }}
+                </small>
                 <small v-if="githubSource(item)" class="focus-item-source">{{ githubSource(item) }}</small>
               </button>
               <button

@@ -6,6 +6,14 @@ export interface GhAuthStatus {
   message: string;
 }
 
+/** Stable action signals; the UI never depends on raw GitHub strings. */
+export type ActionSignal =
+  | "needsAction"
+  | "needsReview"
+  | "ciFailed"
+  | "stale"
+  | "draft";
+
 export interface GhIgnoredItem {
   number: number;
   kind: "pr" | "issue" | string;
@@ -17,6 +25,8 @@ export interface RepoWatch {
   collapsed: boolean;
   ignored: GhIgnoredItem[];
   pinned: number[];
+  /** Action-signal filters; empty means no signal filtering (legacy behavior). */
+  signalFilters: string[];
 }
 
 export interface GhIssue {
@@ -27,6 +37,8 @@ export interface GhIssue {
   updatedAt: string;
   kind: string;
   matches: string[];
+  assignees: string[];
+  signals: ActionSignal[];
 }
 
 export interface GhPullRequest {
@@ -37,6 +49,11 @@ export interface GhPullRequest {
   url: string;
   updatedAt: string;
   matches: string[];
+  assignees: string[];
+  reviewers: string[];
+  headSha: string | null;
+  checksState: string | null;
+  signals: ActionSignal[];
 }
 
 export interface RepoSnapshot {
@@ -47,4 +64,6 @@ export interface RepoSnapshot {
   lastError: string | null;
   issues: GhIssue[];
   pullRequests: GhPullRequest[];
+  /** When the persisted signals were computed; null for pre-signal caches. */
+  signalsComputedAt: string | null;
 }

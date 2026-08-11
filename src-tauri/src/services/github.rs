@@ -6,11 +6,17 @@ use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
-use crate::models::{GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
+use crate::models::{
+    refresh_stale, ActionSignal, GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot,
+    RepoWatch,
+};
 use crate::storage::Storage;
 
 const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved", "all-prs"];
 const DEFAULT_FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
+const SIGNAL_FILTERS: &[&str] = &["needsAction", "needsReview", "ciFailed", "stale"];
+/// Fallback used when `config.json` cannot be read for the stale threshold.
+const DEFAULT_STALE_DAYS: u32 = 14;
 
 pub struct GithubService {
     storage: Arc<Storage>,
@@ -103,6 +109,7 @@ impl GithubService {
                 collapsed: false,
                 ignored: vec![],
                 pinned: vec![],
+                signal_filters: vec![],
             });
             self.save_watchlist(&list)?;
         }
@@ -123,6 +130,26 @@ impl GithubService {
         item.filters = filters
             .into_iter()
             .filter(|v| FILTERS.contains(&v.as_str()))
+            .collect();
+        self.save_watchlist(&list)?;
+        Ok(list)
+    }
+
+    /// Action-signal filters. An empty list means "no signal filtering",
+    /// which preserves the legacy list behavior for existing users.
+    pub fn set_signal_filters(
+        &self,
+        name: &str,
+        filters: Vec<String>,
+    ) -> AppResult<Vec<RepoWatch>> {
+        let mut list = self.watchlist()?;
+        let item = list
+            .iter_mut()
+            .find(|v| v.full_name == name)
+            .ok_or_else(|| AppError::NotFound(name.into()))?;
+        item.signal_filters = filters
+            .into_iter()
+            .filter(|v| SIGNAL_FILTERS.contains(&v.as_str()))
             .collect();
         self.save_watchlist(&list)?;
         Ok(list)
@@ -188,17 +215,24 @@ impl GithubService {
         let pinned = item.pinned.clone();
         self.save_watchlist(&list)?;
 
+        let user = self
+            .status()
+            .user
+            .ok_or_else(|| AppError::Github("GitHub CLI 未登录或离线".into()))?;
+        let now = now_rfc3339();
         let mut snapshot = self.snapshot(&full_name)?.unwrap_or_else(|| RepoSnapshot {
-            schema_version: 1,
+            schema_version: 2,
             repo: full_name.clone(),
-            fetched_at: now_rfc3339(),
+            fetched_at: now.clone(),
             last_success_at: None,
             last_error: None,
             issues: vec![],
             pull_requests: vec![],
+            signals_computed_at: Some(now.clone()),
         });
         merge_pinned_item(&mut snapshot, fetched);
         apply_watch_prefs(&mut snapshot, &ignored, &pinned);
+        apply_signals(&mut snapshot, &user, self.stale_days(), &now);
         sort_snapshot(&mut snapshot);
         self.storage
             .write_json(&cache_path(&self.storage, &full_name), &snapshot)?;
@@ -226,7 +260,19 @@ impl GithubService {
     }
 
     pub fn snapshot(&self, repo: &str) -> AppResult<Option<RepoSnapshot>> {
-        self.storage.read_json(&cache_path(&self.storage, repo))
+        let mut snapshot: Option<RepoSnapshot> =
+            self.storage.read_json(&cache_path(&self.storage, repo))?;
+        if let Some(snap) = snapshot.as_mut() {
+            let stale_days = self.stale_days();
+            let now = now_rfc3339();
+            for pr in &mut snap.pull_requests {
+                refresh_stale(&mut pr.signals, &pr.updated_at, stale_days, &now);
+            }
+            for issue in &mut snap.issues {
+                refresh_stale(&mut issue.signals, &issue.updated_at, stale_days, &now);
+            }
+        }
+        Ok(snapshot)
     }
 
     pub fn refresh(&self, repo: &str) -> AppResult<RepoSnapshot> {
@@ -261,20 +307,17 @@ impl GithubService {
     pub fn refresh_all(&self) -> AppResult<Vec<RepoSnapshot>> {
         let watches = self.watchlist()?;
         let mut out = vec![];
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = watches
-                .iter()
-                .map(|watch| {
-                    let repo = watch.full_name.clone();
-                    scope.spawn(move || self.refresh(&repo))
-                })
-                .collect();
-            for handle in handles {
-                if let Ok(Ok(snapshot)) = handle.join() {
-                    out.push(snapshot);
-                }
+        // Serial per-repo refresh bounds the number of gh subprocesses and
+        // smooths API rate-limit pressure. The `refreshing` guard below
+        // already prevents two refreshes of the same repo from running
+        // concurrently, so a repeated click / background timer never starts a
+        // duplicate refresh. A failing repo keeps its old cache (its snapshot
+        // carries `lastError`) and never clears other repos.
+        for watch in watches {
+            if let Ok(snapshot) = self.refresh(&watch.full_name) {
+                out.push(snapshot);
             }
-        });
+        }
         Ok(out)
     }
 
@@ -294,8 +337,10 @@ impl GithubService {
                 collapsed: false,
                 ignored: vec![],
                 pinned: vec![],
+                signal_filters: vec![],
             });
         let filters = watch.filters.clone();
+        let old = self.snapshot(repo)?;
         let mut issues: HashMap<(u64, String), GhIssue> = HashMap::new();
         let mut prs: HashMap<u64, GhPullRequest> = HashMap::new();
 
@@ -400,20 +445,45 @@ impl GithubService {
         }
 
         let now = now_rfc3339();
+        // Enrich open PRs with review requests and check state. When a PR's
+        // `updated_at` is unchanged since the last snapshot, the cached raw
+        // fields are reused and no extra GitHub API call is made (rate-limit
+        // friendly); per-PR failures degrade to the fields we already have.
+        for pr in prs.values_mut() {
+            if pr.state != "open" {
+                continue;
+            }
+            if let Some(cached) = old
+                .as_ref()
+                .and_then(|snap| snap.pull_requests.iter().find(|p| p.number == pr.number))
+            {
+                if cached.updated_at == pr.updated_at {
+                    pr.assignees = cached.assignees.clone();
+                    pr.reviewers = cached.reviewers.clone();
+                    pr.head_sha = cached.head_sha.clone();
+                    pr.checks_state = cached.checks_state.clone();
+                    continue;
+                }
+            }
+            let _ = self.enrich_pull(repo, pr);
+        }
+
         let mut snapshot = RepoSnapshot {
-            schema_version: 1,
+            schema_version: 2,
             repo: repo.into(),
             fetched_at: now.clone(),
-            last_success_at: Some(now),
+            last_success_at: Some(now.clone()),
             last_error: None,
             issues: issues.into_values().collect(),
             pull_requests: prs.into_values().collect(),
+            signals_computed_at: Some(now.clone()),
         };
         apply_watch_prefs(
             &mut snapshot,
             watch.ignored.as_slice(),
             watch.pinned.as_slice(),
         );
+        apply_signals(&mut snapshot, &user, self.stale_days(), &now);
         sort_snapshot(&mut snapshot);
         self.storage
             .write_json(&cache_path(&self.storage, repo), &snapshot)?;
@@ -435,6 +505,33 @@ impl GithubService {
         } else {
             Ok(FetchedItem::Issue(row.into_issue(vec!["pinned".into()])))
         }
+    }
+
+    /// Fetch the PR detail (requested reviewers, head SHA, assignees) and the
+    /// check state for an open PR. Missing fields degrade to `None` / empty,
+    /// and an API failure for one PR never fails the whole repo refresh.
+    fn enrich_pull(&self, repo: &str, pr: &mut GhPullRequest) -> AppResult<()> {
+        let detail: PullDetail = gh_json(&["api", &format!("repos/{repo}/pulls/{}", pr.number)])?;
+        pr.draft = detail.draft;
+        pr.updated_at = detail.updated_at;
+        pr.assignees = detail.assignees.iter().map(|u| u.login.clone()).collect();
+        pr.reviewers = detail
+            .requested_reviewers
+            .iter()
+            .map(|u| u.login.clone())
+            .collect();
+        let sha = detail.head.sha;
+        pr.head_sha = Some(sha.clone());
+        let (_, state) = fetch_checks_state(repo, &sha);
+        pr.checks_state = state;
+        Ok(())
+    }
+
+    fn stale_days(&self) -> u32 {
+        self.storage
+            .load_config()
+            .map(|config| config.github_stale_days)
+            .unwrap_or(DEFAULT_STALE_DAYS)
     }
 }
 
@@ -495,6 +592,135 @@ fn strip_pin_marker(snapshot: &mut RepoSnapshot, number: u64) {
     }
 }
 
+/// Recompute the stable action signals for every open item from the parsed
+/// response fields. Closed / merged items keep an empty signal list so the
+/// existing display rules (dimmed, no action badges) stay intact.
+fn apply_signals(snapshot: &mut RepoSnapshot, user: &str, stale_days: u32, now: &str) {
+    for pr in &mut snapshot.pull_requests {
+        pr.signals = if pr.state == "open" {
+            compute_signals(SignalInputs {
+                is_pr: true,
+                draft: pr.draft,
+                assignees: pr.assignees.clone(),
+                reviewers: pr.reviewers.clone(),
+                checks_state: pr.checks_state.clone(),
+                matches: pr.matches.clone(),
+                user: user.into(),
+                stale_days,
+                updated_at: pr.updated_at.clone(),
+                now: now.into(),
+            })
+        } else {
+            Vec::new()
+        };
+    }
+    for issue in &mut snapshot.issues {
+        issue.signals = if issue.state == "open" {
+            compute_signals(SignalInputs {
+                is_pr: false,
+                draft: false,
+                assignees: issue.assignees.clone(),
+                reviewers: vec![],
+                checks_state: None,
+                matches: issue.matches.clone(),
+                user: user.into(),
+                stale_days,
+                updated_at: issue.updated_at.clone(),
+                now: now.into(),
+            })
+        } else {
+            Vec::new()
+        };
+    }
+}
+
+/// Map parsed GitHub response fields onto the stable signal set. The UI only
+/// ever consumes `ActionSignal` values, never raw GitHub strings.
+struct SignalInputs {
+    is_pr: bool,
+    draft: bool,
+    assignees: Vec<String>,
+    reviewers: Vec<String>,
+    checks_state: Option<String>,
+    matches: Vec<String>,
+    user: String,
+    stale_days: u32,
+    updated_at: String,
+    now: String,
+}
+
+fn compute_signals(input: SignalInputs) -> Vec<ActionSignal> {
+    let mut signals = Vec::new();
+    let needs_action = input
+        .matches
+        .iter()
+        .any(|m| matches!(m.as_str(), "assigned" | "mentioned" | "involved" | "pinned"))
+        || input.assignees.contains(&input.user);
+    if needs_action {
+        signals.push(ActionSignal::NeedsAction);
+    }
+    if input.is_pr && input.reviewers.contains(&input.user) {
+        signals.push(ActionSignal::NeedsReview);
+    }
+    if input.is_pr
+        && input
+            .checks_state
+            .as_deref()
+            .map(|state| state == "failure" || state == "error")
+            .unwrap_or(false)
+    {
+        signals.push(ActionSignal::CiFailed);
+    }
+    if crate::models::github::is_stale(&input.updated_at, input.stale_days, &input.now) {
+        signals.push(ActionSignal::Stale);
+    }
+    if input.is_pr && input.draft {
+        signals.push(ActionSignal::Draft);
+    }
+    signals
+}
+
+/// Best-effort check status for a commit. Classic commit statuses are checked
+/// first; when a repo only uses check runs (e.g. GitHub Actions), the
+/// `check-runs` endpoint is queried instead. Any API failure / missing field
+/// degrades to `(false, None)` so one PR never fails the whole repo refresh.
+fn fetch_checks_state(repo: &str, sha: &str) -> (bool, Option<String>) {
+    if let Ok(status) =
+        gh_json::<CombinedStatus>(&["api", &format!("repos/{repo}/commits/{sha}/status")])
+    {
+        let state = status.state.to_ascii_lowercase();
+        if !status.statuses.is_empty() {
+            let failed = state == "failure" || state == "error";
+            return (failed, Some(state));
+        }
+    }
+    match gh_json::<CheckRuns>(&["api", &format!("repos/{repo}/commits/{sha}/check-runs")]) {
+        Ok(runs) => {
+            if runs.check_runs.is_empty() {
+                return (false, None);
+            }
+            let any_failed = runs.check_runs.iter().any(|run| {
+                matches!(
+                    run.conclusion.as_deref(),
+                    Some("failure" | "timed_out" | "action_required")
+                )
+            });
+            let any_pending = runs.check_runs.iter().any(|run| {
+                run.conclusion.is_none() || run.conclusion.as_deref() == Some("pending")
+            });
+            let state = if any_failed {
+                "failure"
+            } else if any_pending {
+                "pending"
+            } else {
+                "success"
+            };
+            (any_failed, Some(state.into()))
+        }
+        Err(_) => (false, None),
+    }
+}
+
 fn apply_watch_prefs(snapshot: &mut RepoSnapshot, ignored: &[GhIgnoredItem], pinned: &[u64]) {
     snapshot.pull_requests.retain(|pr| {
         !ignored
@@ -519,21 +745,41 @@ fn apply_watch_prefs(snapshot: &mut RepoSnapshot, ignored: &[GhIgnoredItem], pin
 }
 
 fn sort_snapshot(snapshot: &mut RepoSnapshot) {
-    let pinned_first = |matches: &[String], number: u64| -> (bool, u64) {
-        (!matches.iter().any(|m| m == "pinned"), u64::MAX - number)
+    let pinned = |matches: &[String]| matches.iter().any(|m| m == "pinned");
+    let actionable = |signals: &[ActionSignal]| {
+        signals
+            .iter()
+            .filter(|signal| signal.is_actionable())
+            .count()
     };
-    snapshot
-        .pull_requests
-        .sort_by_key(|pr| pinned_first(&pr.matches, pr.number));
-    snapshot
-        .issues
-        .sort_by_key(|issue| pinned_first(&issue.matches, issue.number));
+    // Pinned first, then items with more actionable signals, then by update
+    // recency, then by number descending (stable and explainable).
+    snapshot.pull_requests.sort_by(|a, b| {
+        pinned(&b.matches)
+            .cmp(&pinned(&a.matches))
+            .then_with(|| actionable(&b.signals).cmp(&actionable(&a.signals)))
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| b.number.cmp(&a.number))
+    });
+    snapshot.issues.sort_by(|a, b| {
+        pinned(&b.matches)
+            .cmp(&pinned(&a.matches))
+            .then_with(|| actionable(&b.signals).cmp(&actionable(&a.signals)))
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| b.number.cmp(&a.number))
+    });
 }
 
 #[derive(Deserialize, Clone)]
 struct SearchResult {
     items: Vec<ApiItem>,
 }
+
+#[derive(Deserialize, Clone)]
+struct GhUser {
+    login: String,
+}
+
 #[derive(Deserialize, Clone)]
 struct ApiItem {
     number: u64,
@@ -543,6 +789,8 @@ struct ApiItem {
     updated_at: String,
     #[serde(default)]
     draft: bool,
+    #[serde(default)]
+    assignees: Vec<GhUser>,
     pull_request: Option<serde_json::Value>,
 }
 impl ApiItem {
@@ -555,6 +803,11 @@ impl ApiItem {
             url: self.html_url,
             updated_at: self.updated_at,
             matches,
+            assignees: self.assignees.iter().map(|u| u.login.clone()).collect(),
+            reviewers: vec![],
+            head_sha: None,
+            checks_state: None,
+            signals: vec![],
         }
     }
     fn into_issue(self, matches: Vec<String>) -> GhIssue {
@@ -566,8 +819,51 @@ impl ApiItem {
             updated_at: self.updated_at,
             kind: "issue".into(),
             matches,
+            assignees: self.assignees.iter().map(|u| u.login.clone()).collect(),
+            signals: vec![],
         }
     }
+}
+
+/// Full PR response (`repos/{owner}/{repo}/pulls/{number}`), used for the
+/// fields the search / list endpoints do not return: requested reviewers and
+/// the head commit SHA for check lookups.
+#[derive(Deserialize, Clone)]
+struct PullDetail {
+    #[serde(default)]
+    draft: bool,
+    updated_at: String,
+    #[serde(default)]
+    assignees: Vec<GhUser>,
+    #[serde(default)]
+    requested_reviewers: Vec<GhUser>,
+    head: PullHead,
+}
+
+#[derive(Deserialize, Clone)]
+struct PullHead {
+    sha: String,
+}
+
+/// `GET /repos/{owner}/{repo}/commits/{sha}/status` (classic commit statuses).
+#[derive(Deserialize)]
+struct CombinedStatus {
+    state: String,
+    #[serde(default)]
+    statuses: Vec<serde_json::Value>,
+}
+
+/// `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`.
+#[derive(Deserialize)]
+struct CheckRuns {
+    #[serde(default)]
+    check_runs: Vec<CheckRun>,
+}
+
+#[derive(Deserialize)]
+struct CheckRun {
+    #[serde(default)]
+    conclusion: Option<String>,
 }
 fn gh_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> AppResult<T> {
     serde_json::from_str(&run_gh(args)?)
@@ -652,4 +948,300 @@ fn cache_path(storage: &Storage, repo: &str) -> std::path::PathBuf {
         .data_dir()
         .join("github/cache")
         .join(format!("{}.json", repo.replace('/', "_")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ActionSignal;
+
+    fn matches(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    fn repo_snapshot(repo: &str) -> RepoSnapshot {
+        RepoSnapshot {
+            schema_version: 2,
+            repo: repo.into(),
+            fetched_at: "2026-08-15T00:00:00Z".into(),
+            last_success_at: Some("2026-08-15T00:00:00Z".into()),
+            last_error: None,
+            issues: vec![],
+            pull_requests: vec![],
+            signals_computed_at: Some("2026-08-15T00:00:00Z".into()),
+        }
+    }
+
+    fn pr(
+        number: u64,
+        updated_at: &str,
+        matches: &[&str],
+        signals: &[ActionSignal],
+    ) -> GhPullRequest {
+        GhPullRequest {
+            number,
+            title: format!("PR #{number}"),
+            state: "open".into(),
+            draft: false,
+            url: format!("https://example.test/pull/{number}"),
+            updated_at: updated_at.into(),
+            matches: matches.iter().map(|v| v.to_string()).collect(),
+            assignees: vec![],
+            reviewers: vec![],
+            head_sha: None,
+            checks_state: None,
+            signals: signals.to_vec(),
+        }
+    }
+
+    #[test]
+    fn compute_signals_maps_response_fixtures() {
+        let now = "2026-08-15T00:00:00Z";
+        let input = |is_pr: bool,
+                     draft: bool,
+                     assignees: Vec<String>,
+                     reviewers: Vec<String>,
+                     checks_state: Option<String>,
+                     matches: Vec<String>,
+                     updated_at: &str|
+         -> SignalInputs {
+            SignalInputs {
+                is_pr,
+                draft,
+                assignees,
+                reviewers,
+                checks_state,
+                matches,
+                user: "wynxing".into(),
+                stale_days: 14,
+                updated_at: updated_at.into(),
+                now: now.into(),
+            }
+        };
+
+        // 需要我处理：被分配过滤器命中，assignees 字段兜底。
+        let signals = compute_signals(input(
+            false,
+            false,
+            vec!["wynxing".into()],
+            vec![],
+            None,
+            matches(&["assigned"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::NeedsAction]);
+
+        // 需要 Review：requested_reviewers 含当前用户；check 成功不误报。
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec!["alice".into(), "wynxing".into()],
+            Some("success".into()),
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::NeedsReview]);
+
+        // CI 失败：failure / error 都算失败，pending 不算。
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec![],
+            Some("failure".into()),
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::CiFailed]);
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec![],
+            Some("error".into()),
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::CiFailed]);
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec![],
+            Some("pending".into()),
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert!(signals.is_empty());
+
+        // Draft 仅作用于 PR；issue 的 draft 字段不产生信号。
+        let signals = compute_signals(input(
+            true,
+            true,
+            vec![],
+            vec![],
+            Some("success".into()),
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::Draft]);
+        let signals = compute_signals(input(
+            false,
+            true,
+            vec![],
+            vec![],
+            None,
+            matches(&["mine"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert!(signals.is_empty());
+
+        // 长期未更新：超过配置天数。
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec![],
+            None,
+            matches(&["mine"]),
+            "2026-07-01T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::Stale]);
+
+        // 手动关注（pinned）也算需要我处理。
+        let signals = compute_signals(input(
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            matches(&["pinned"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert_eq!(signals, vec![ActionSignal::NeedsAction]);
+
+        // 完全无关的条目（all-prs 且无 review/check/draft）不产生信号。
+        let signals = compute_signals(input(
+            true,
+            false,
+            vec![],
+            vec![],
+            None,
+            matches(&["all-prs"]),
+            "2026-08-10T00:00:00Z",
+        ));
+        assert!(signals.is_empty());
+    }
+
+    #[test]
+    fn sort_snapshot_orders_pinned_then_actionable_then_recent() {
+        let mut snapshot = repo_snapshot("owner/repo");
+        snapshot.pull_requests = vec![
+            pr(
+                1,
+                "2026-08-01T00:00:00Z",
+                &["mine"],
+                &[ActionSignal::NeedsAction],
+            ),
+            pr(
+                2,
+                "2026-08-03T00:00:00Z",
+                &["mine"],
+                &[ActionSignal::NeedsAction],
+            ),
+            pr(
+                3,
+                "2026-08-04T00:00:00Z",
+                &["mine"],
+                &[ActionSignal::NeedsAction, ActionSignal::CiFailed],
+            ),
+            pr(
+                4,
+                "2026-08-02T00:00:00Z",
+                &["pinned"],
+                &[ActionSignal::NeedsAction, ActionSignal::NeedsReview],
+            ),
+            pr(
+                5,
+                "2026-08-05T00:00:00Z",
+                &["all-prs"],
+                &[ActionSignal::Draft],
+            ),
+        ];
+        sort_snapshot(&mut snapshot);
+        let numbers: Vec<u64> = snapshot.pull_requests.iter().map(|p| p.number).collect();
+        assert_eq!(numbers, vec![4, 3, 2, 1, 5]);
+    }
+
+    #[test]
+    fn set_signal_filters_accepts_only_stable_names() {
+        let dir =
+            std::env::temp_dir().join(format!("maydolist-gh-signal-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let service = GithubService::new(storage.clone());
+        let watch = RepoWatch {
+            full_name: "owner/repo".into(),
+            filters: vec!["mine".into()],
+            collapsed: false,
+            ignored: vec![],
+            pinned: vec![],
+            signal_filters: vec![],
+        };
+        storage
+            .write_json(
+                &storage.data_dir().join("github/watchlist.json"),
+                &vec![watch],
+            )
+            .unwrap();
+
+        let list = service
+            .set_signal_filters(
+                "owner/repo",
+                vec![
+                    "needsAction".into(),
+                    "review_requested".into(),
+                    "ciFailed".into(),
+                    "draft".into(),
+                    "stale".into(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            list[0].signal_filters,
+            vec!["needsAction", "ciFailed", "stale"]
+        );
+
+        let list = service.set_signal_filters("owner/repo", vec![]).unwrap();
+        assert!(list[0].signal_filters.is_empty());
+        assert!(service.set_signal_filters("missing/repo", vec![]).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn snapshot_serves_fresh_stale_signal() {
+        let dir = std::env::temp_dir().join(format!("maydolist-gh-stale-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let service = GithubService::new(storage.clone());
+        let mut snapshot = repo_snapshot("owner/repo");
+        snapshot.pull_requests = vec![pr(
+            1,
+            "2026-06-01T00:00:00Z",
+            &["mine"],
+            &[ActionSignal::NeedsAction],
+        )];
+        storage
+            .write_json(
+                &storage.data_dir().join("github/cache/owner_repo.json"),
+                &snapshot,
+            )
+            .unwrap();
+        let served = service.snapshot("owner/repo").unwrap().unwrap();
+        assert!(served.pull_requests[0]
+            .signals
+            .contains(&ActionSignal::Stale));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

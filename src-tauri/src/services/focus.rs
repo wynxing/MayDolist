@@ -205,9 +205,12 @@ pub fn merge_note_sections(
     pinned
 }
 
-/// Open GitHub items from local snapshot caches. Pinned (manually followed)
-/// items come first, then by `updated_at` descending. Returns the items and
-/// whether the section relies on an offline / stale cache.
+/// Open GitHub items from local snapshot caches. Focus is an action inbox, so
+/// only items carrying at least one actionable signal
+/// (`needsAction` / `needsReview` / `ciFailed` / `stale`) are aggregated;
+/// draft-only or unrelated open items stay in the GitHub view. Pinned items
+/// come first, then by `updated_at` descending. Returns the items and whether
+/// the section relies on an offline / stale cache.
 pub fn project_github(
     _watchlist: &[RepoWatch],
     snapshots: &[RepoSnapshot],
@@ -217,7 +220,7 @@ pub fn project_github(
     let mut seen = HashSet::new();
     for snapshot in snapshots {
         for pr in &snapshot.pull_requests {
-            if pr.state != "open" {
+            if pr.state != "open" || !pr.signals.iter().any(|s| s.is_actionable()) {
                 continue;
             }
             let key = (snapshot.repo.clone(), pr.number, "pr".to_string());
@@ -236,10 +239,11 @@ pub fn project_github(
                 updated_at: pr.updated_at.clone(),
                 pinned,
                 matches: pr.matches.clone(),
+                signals: pr.signals.clone(),
             });
         }
         for issue in &snapshot.issues {
-            if issue.state != "open" {
+            if issue.state != "open" || !issue.signals.iter().any(|s| s.is_actionable()) {
                 continue;
             }
             let key = (snapshot.repo.clone(), issue.number, "issue".to_string());
@@ -258,6 +262,7 @@ pub fn project_github(
                 updated_at: issue.updated_at.clone(),
                 pinned,
                 matches: issue.matches.clone(),
+                signals: issue.signals.clone(),
             });
         }
     }
@@ -340,7 +345,31 @@ mod tests {
             last_error: None,
             issues: vec![],
             pull_requests: vec![],
+            signals_computed_at: None,
         }
+    }
+
+    fn test_signals(matches: &[&str]) -> Vec<crate::models::ActionSignal> {
+        let mut signals = Vec::new();
+        if matches
+            .iter()
+            .any(|m| ["pinned", "mine", "mentioned", "assigned", "involved"].contains(m))
+        {
+            signals.push(crate::models::ActionSignal::NeedsAction);
+        }
+        if matches.contains(&"review") {
+            signals.push(crate::models::ActionSignal::NeedsReview);
+        }
+        if matches.contains(&"ci") {
+            signals.push(crate::models::ActionSignal::CiFailed);
+        }
+        if matches.contains(&"stale") {
+            signals.push(crate::models::ActionSignal::Stale);
+        }
+        if matches.contains(&"draft") {
+            signals.push(crate::models::ActionSignal::Draft);
+        }
+        signals
     }
 
     fn pr(number: u64, state: &str, updated_at: &str, matches: &[&str]) -> GhPullRequest {
@@ -352,6 +381,11 @@ mod tests {
             url: format!("https://example.test/pr/{number}"),
             updated_at: updated_at.into(),
             matches: matches.iter().map(|v| v.to_string()).collect(),
+            assignees: vec![],
+            reviewers: vec![],
+            head_sha: None,
+            checks_state: None,
+            signals: test_signals(matches),
         }
     }
 
@@ -364,6 +398,8 @@ mod tests {
             updated_at: updated_at.into(),
             kind: "issue".into(),
             matches: matches.iter().map(|v| v.to_string()).collect(),
+            assignees: vec![],
+            signals: test_signals(matches),
         }
     }
 
@@ -505,6 +541,52 @@ mod tests {
     }
 
     #[test]
+    fn github_aggregates_only_actionable_signals() {
+        let mut snap = snapshot("owner/repo");
+        snap.pull_requests = vec![
+            // Review request → actionable.
+            pr(101, "open", "2026-08-02T00:00:00Z", &["all-prs", "review"]),
+            // Failed CI → actionable.
+            pr(102, "open", "2026-08-02T00:00:00Z", &["all-prs", "ci"]),
+            // Stale only → actionable.
+            pr(103, "open", "2026-06-01T00:00:00Z", &["all-prs", "stale"]),
+            // Draft only → informational, stays in GitHub view only.
+            pr(104, "open", "2026-08-02T00:00:00Z", &["all-prs", "draft"]),
+            // No signal at all → excluded.
+            pr(105, "open", "2026-08-02T00:00:00Z", &["all-prs"]),
+            // Closed items never enter Focus.
+            pr(106, "closed", "2026-08-02T00:00:00Z", &["pinned"]),
+        ];
+        snap.issues = vec![issue(201, "open", "2026-08-01T00:00:00Z", &["mentioned"])];
+        let status = GhAuthStatus {
+            state: "authenticated".into(),
+            logged_in: true,
+            user: Some("wynxing".into()),
+            version: Some("gh 2.97.0".into()),
+            message: String::new(),
+        };
+        let (items, offline) = project_github(&[], &[snap], &status);
+        assert!(!offline);
+        let numbers: Vec<u64> = items.iter().map(|v| v.number).collect();
+        // Pinned first, then by `updated_at` descending: #101/#102 (08-02),
+        // issue #201 (08-01), stale #103 (oldest) last.
+        assert_eq!(numbers, vec![101, 102, 201, 103]);
+        assert!(items
+            .iter()
+            .all(|v| v.signals.iter().any(|s| s.is_actionable())));
+        assert!(items.iter().any(|v| v
+            .signals
+            .contains(&crate::models::ActionSignal::NeedsReview)));
+        assert!(items
+            .iter()
+            .any(|v| v.signals.contains(&crate::models::ActionSignal::CiFailed)));
+        assert!(items
+            .iter()
+            .any(|v| v.signals.contains(&crate::models::ActionSignal::Stale)));
+        assert!(!items.iter().any(|v| v.number == 104));
+    }
+
+    #[test]
     fn note_preview_truncates_long_content() {
         let long: String = "字".repeat(120);
         assert_eq!(preview_of(&long).chars().count(), NOTE_PREVIEW_CHARS + 1);
@@ -596,6 +678,7 @@ mod tests {
             collapsed: false,
             ignored: vec![],
             pinned: vec![],
+            signal_filters: vec![],
         }];
         storage
             .write_json(

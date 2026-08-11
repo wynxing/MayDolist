@@ -8,6 +8,7 @@ pub use config::AppConfig;
 pub use focus::{
     FocusGithub, FocusNote, FocusOverview, FocusSection, FocusSectionState, FocusTodo,
 };
+pub use github::{refresh_stale, ActionSignal};
 pub use github::{GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
 pub use note::{Note, WindowBounds};
 pub use todo::{TodoItem, TodoList, TodoSource};

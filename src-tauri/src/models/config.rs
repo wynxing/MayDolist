@@ -22,6 +22,10 @@ fn default_quick_capture_enabled() -> bool {
     true
 }
 
+fn default_github_stale_days() -> u32 {
+    14
+}
+
 fn deserialize_string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -46,6 +50,10 @@ pub struct AppConfig {
     /// Whether the quick capture window and its hotkey are enabled.
     #[serde(default = "default_quick_capture_enabled")]
     pub quick_capture_enabled: bool,
+    /// Days after which an open GitHub item is flagged "长期未更新".
+    /// 0 disables the stale signal.
+    #[serde(default = "default_github_stale_days")]
+    pub github_stale_days: u32,
     pub theme: String,
     pub github_refresh_interval_minutes: u32,
     pub autostart: bool,
@@ -99,6 +107,7 @@ impl Default for AppConfig {
             hotkey: "Ctrl+Alt+M".into(),
             quick_capture_hotkey: default_quick_capture_hotkey(),
             quick_capture_enabled: default_quick_capture_enabled(),
+            github_stale_days: default_github_stale_days(),
             theme: "system".into(),
             github_refresh_interval_minutes: 30,
             autostart: false,
@@ -164,6 +173,36 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.quick_capture_hotkey, "Ctrl+Alt+Space");
         assert!(config.quick_capture_enabled);
+        assert_eq!(config.github_stale_days, 14);
+    }
+
+    #[test]
+    fn legacy_config_receives_stale_days_default() {
+        let json = r#"{
+            "schemaVersion": 2,
+            "dataDir": null,
+            "hotCorner": "top-right",
+            "hotkey": "Ctrl+Alt+M",
+            "theme": "dark",
+            "githubRefreshIntervalMinutes": 30,
+            "autostart": false,
+            "firstRun": true
+        }"#;
+        let restored: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.github_stale_days, 14);
+        let json = serde_json::to_string(&restored).unwrap();
+        assert!(json.contains("\"githubStaleDays\":14"));
+    }
+
+    #[test]
+    fn stale_days_roundtrips_and_zero_is_preserved() {
+        let config = AppConfig {
+            github_stale_days: 0,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.github_stale_days, 0);
     }
 
     #[test]
