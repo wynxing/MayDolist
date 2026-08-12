@@ -79,6 +79,7 @@ flowchart TB
         Main["主面板（Focus / Todo / 便签 / GitHub / 设置）"]
         Note["悬浮便签窗（可多开）"]
         Quick["快速收集窗（轻量输入）"]
+        Palette["命令面板窗（Ctrl+K 全局搜索 / 命令）"]
     end
 
     subgraph Rust["Rust 系统层（Tauri 2）"]
@@ -97,6 +98,8 @@ flowchart TB
 
     Main -->|invoke / 事件| Cmd
     Note -->|invoke / 事件| Cmd
+    Quick -->|invoke / 事件| Cmd
+    Palette -->|invoke / 事件| Cmd
     Cmd --> App
     Cmd --> Store
     Cmd --> Gh
@@ -203,7 +206,7 @@ flowchart LR
 
 | 模块 | 职责 |
 | --- | --- |
-| `views` | 主面板视图（Focus / Todo / 便签 / GitHub / 设置）、悬浮便签窗与快速收集窗 |
+| `views` | 主面板视图（Focus / Todo / 便签 / GitHub / 设置）、悬浮便签窗、快速收集窗与命令面板窗 |
 | `stores` | Pinia 状态管理，维护 UI 状态与缓存数据 |
 | `api` | `invoke` 封装层，前端唯一的数据访问入口 |
 | `components` | 可复用 UI 组件（卡片、列表、标签、窗口控制等） |
@@ -254,6 +257,7 @@ MayDolist/
 - `mainWindowGlassOpacity`：主面板玻璃背景层 alpha，范围 `0.4..=1.0`。
 - `floatingNoteGlassOpacity`：悬浮便签玻璃背景层 alpha，范围 `0.4..=1.0`。
 - `quickCaptureHotkey` / `quickCaptureEnabled`：快速收集窗的全局快捷键与启用开关，默认 `Ctrl+Alt+Space` / `true`；与主面板快捷键冲突或格式非法时在保存设置时报错，不写入。
+- `commandPaletteHotkey` / `commandPaletteEnabled`：全局命令面板的快捷键与启用开关，默认 `Ctrl+K` / `true`；与主面板或快速收集快捷键冲突或格式非法时在保存设置时报错，不写入。
 - `quietHours`（可选）：提醒安静时段，`start` / `end` 均为本地 `HH:MM`（24 小时制），支持跨午夜（如 `22:00`–`07:00`）；该时段内到期提醒不弹通知，仅保留托盘逾期徽标。旧配置无该字段时按 `null`（不启用）读取；非法值在加载时被清理回 `null`。
 
 相关规则：
@@ -348,6 +352,16 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - **重复生成**：完成带 `repeat` 的任务时，service 按规则与当前时间计算下一次 `dueDate`（daily / weekly / biweekly 按锚点日期步进，monthly 保留锚点日并做月末钳制，如 1-31 → 2-28 → 3-31），`repeatUntil` 到期后停止；新实例与已完成条目在同一原子写内落盘，避免重复生成。
 - **快速捕捉日期**：快速收集输入支持最小自然语言前缀：`明天` / `今天` / `后天`、`周X` / `星期X`（一～日 / 天）、`N天后`（1..=365）、`月底` / `月末`；解析结果写入 `dueDate`，解析失败或没有日期前缀时按普通 Todo 创建，不阻断捕获。
 
+### 6.10 全局命令面板（Ctrl+K）
+
+- **入口与窗口**：全局快捷键默认 `Ctrl+K`（设置中可修改或关闭），复用轻量无边框窗口框架，打开独立的 `command-palette` 窗口（声明为隐藏、置顶、跳过任务栏、Acrylic 毛玻璃），每次呼出时居中于**光标所在屏**（光标不在任何已知屏幕时回退主屏），与快速收集窗口并存、互不影响。
+- **命令**：空输入显示命令列表——切换 Tab（Focus / Todo / 便签 / GitHub / 设置）、新建 Todo、新建便签、立即备份、打开数据目录；命令匹配（标签 / 关键词 / id）在 Rust 层完成并有单测，前缀命中优先于子串命中。
+- **搜索**：输入即搜索（防抖 150ms），`PaletteService` 并发检索 Todo（未完成、含收件箱）、便签标题与全文、GitHub 本地缓存条目，结果按域分组并限制条数（每域上限 8）；任一域加载失败只让该域显示为空，不阻塞命令列表与其他域。
+- **动作**：搜索结果提供最小操作——完成 Todo、打开来源（GitHub 走系统浏览器）、跳转模块、置顶便签；全部复用现有 Tauri command 与 stores（`todo_update_item` / `note_update` / `open_external` 等），不新增写路径；前端不直接写文件。
+- **新建记录**：选中「新建 Todo」/「新建便签」后，面板切换为标题输入模式，Enter 分别复用 `quick_capture_submit`（进入收件箱）与 `note_create`（创建后打开便签模块），Esc 返回命令列表。
+- **交互**：`↑` / `↓` 选择，`Enter` 执行（`event.isComposing` 时忽略，输入法组合输入不触发执行），`Esc` 关闭，空结果显示引导文案；长标题以省略号截断，不破坏布局。
+- **GitHub 离线**：只读本地快照缓存（watchlist 仓库），不触发任何网络请求；未登录或上次刷新失败时结果区标注「离线缓存」。
+
 ### 6.7 备份 / 导入 / 恢复
 
 - **导出数据**：设置页「导出数据」经 Windows 原生保存对话框选择目标路径，写入 `maydolist-export-<时间戳>.zip`（不含任何登录凭据）；「包含 GitHub 缓存」开关控制是否附带可重建的 `github/cache`。
@@ -407,6 +421,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - GitHub 手动刷新与定时刷新成功，条目按仓库分组展示，点击在系统浏览器打开。
 - 设置到期日的 Todo 在 Focus 视图进入正确分组（已逾期置顶高亮、分组标题显示数量）；到点弹出提醒通知，点击通知打开主面板并聚焦条目。
 - 完成带周期规则的 Todo 自动生成下一次实例（`repeatUntil` 到期后停止）；快速收集输入 `明天 提交周报` 等前缀自动带到期日。
+- `Ctrl+K` 打开命令面板：输入关键词能在 Todo / 便签 / GitHub 结果中命中并跳转；输入命令名可切换 Tab 或新建记录；对搜索结果执行「完成 Todo」「打开来源」「置顶便签」等动作后状态正确刷新。
 
 ### 10.2 异常路径
 
@@ -415,6 +430,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 单个 JSON 损坏：隔离并重建该文件，其余数据不受影响。
 - 通知权限缺失 / 系统拦截 / 安静时段：不弹通知，托盘逾期徽标保持可用，主流程不受影响。
 - 非法日期 / 非法周期规则在写入时被拒绝，旧数据或损坏字段读取时降级为无日期，不崩溃。
+- 命令面板：输入法组合输入不触发执行；快捷键冲突或配置非法时保存设置明确报错，不影响主面板；GitHub 离线时仅显示本地缓存并标注「离线缓存」；结果数量受限，长标题截断不破坏布局。
 
 ### 10.3 恢复路径
 

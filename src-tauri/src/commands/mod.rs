@@ -3,6 +3,7 @@ pub mod config;
 pub mod focus;
 pub mod github;
 pub mod note;
+pub mod palette;
 pub mod quick_capture;
 pub mod settings;
 pub mod todo;

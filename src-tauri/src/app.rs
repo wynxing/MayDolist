@@ -11,7 +11,9 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::{Effect, EffectsBuilder};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 pub fn setup(app: &mut tauri::App) -> AppResult<()> {
@@ -77,14 +79,25 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
             }
         });
     }
+    if let Some(command_palette) = app.get_webview_window(COMMAND_PALETTE_WINDOW) {
+        apply_acrylic(&command_palette);
+        let window = command_palette.clone();
+        command_palette.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                window.hide().ok();
+            }
+        });
+    }
     spawn_github_refresh(app.handle().clone());
     Ok(())
 }
 
-/// Register the main panel and quick capture global hotkeys from the config.
-/// Both shortcuts are parsed before anything is unregistered, so an invalid
-/// value never disables a working hotkey. The quick capture hotkey is only
-/// registered when `quick_capture_enabled` is true.
+/// Register the main panel, quick capture and command palette global hotkeys
+/// from the config. All shortcuts are parsed and conflict-checked before
+/// anything is unregistered, so an invalid value never disables a working
+/// hotkey. The optional shortcuts are only registered when their enable flag
+/// is true.
 pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
     let main_shortcut = Shortcut::from_str(&config.hotkey)
         .map_err(|e| AppError::InvalidInput(format!("invalid hotkey: {e}")))?;
@@ -101,6 +114,31 @@ pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
         }
         Some(
             Shortcut::from_str(&config.quick_capture_hotkey)
+                .map_err(|e| AppError::InvalidInput(format!("invalid hotkey: {e}")))?,
+        )
+    } else {
+        None
+    };
+    let palette_shortcut = if config.command_palette_enabled {
+        if config.command_palette_hotkey.trim().is_empty() {
+            return Err(AppError::InvalidInput(
+                "command palette hotkey must not be empty".into(),
+            ));
+        }
+        if config.command_palette_hotkey.trim() == config.hotkey.trim() {
+            return Err(AppError::InvalidInput(
+                "command palette hotkey conflicts with the main panel hotkey".into(),
+            ));
+        }
+        if config.quick_capture_enabled
+            && config.command_palette_hotkey.trim() == config.quick_capture_hotkey.trim()
+        {
+            return Err(AppError::InvalidInput(
+                "command palette hotkey conflicts with the quick capture hotkey".into(),
+            ));
+        }
+        Some(
+            Shortcut::from_str(&config.command_palette_hotkey)
                 .map_err(|e| AppError::InvalidInput(format!("invalid hotkey: {e}")))?,
         )
     } else {
@@ -123,6 +161,16 @@ pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
             .on_shortcut(shortcut, move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     toggle_quick_capture(&handle).ok();
+                }
+            })
+            .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
+    }
+    if let Some(shortcut) = palette_shortcut {
+        let handle = app.clone();
+        app.global_shortcut()
+            .on_shortcut(shortcut, move |_app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_command_palette(&handle).ok();
                 }
             })
             .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
@@ -253,6 +301,67 @@ pub fn toggle_quick_capture(app: &AppHandle) -> AppResult<()> {
     } else {
         show_quick_capture(app)
     }
+}
+
+pub const COMMAND_PALETTE_WINDOW: &str = "command-palette";
+
+/// Show (and focus) the command palette window, centered on the monitor that
+/// currently contains the cursor (falling back to the primary monitor), then
+/// tell the view to focus and select its input. The window is declared hidden
+/// in tauri.conf.json so this only ever reuses an already-created webview.
+pub fn show_command_palette(app: &AppHandle) -> AppResult<()> {
+    let window = app
+        .get_webview_window(COMMAND_PALETTE_WINDOW)
+        .ok_or_else(|| AppError::NotFound("command palette window".into()))?;
+    apply_acrylic(&window);
+    center_on_cursor_or_primary(&window)?;
+    window.show().map_err(internal)?;
+    window.set_focus().map_err(internal)?;
+    app.emit_to(COMMAND_PALETTE_WINDOW, "command-palette-open", ())
+        .map_err(internal)
+}
+
+pub fn hide_command_palette(app: &AppHandle) -> AppResult<()> {
+    if let Some(window) = app.get_webview_window(COMMAND_PALETTE_WINDOW) {
+        window.hide().map_err(internal)?;
+    }
+    Ok(())
+}
+
+pub fn toggle_command_palette(app: &AppHandle) -> AppResult<()> {
+    let window = app
+        .get_webview_window(COMMAND_PALETTE_WINDOW)
+        .ok_or_else(|| AppError::NotFound("command palette window".into()))?;
+    if window.is_visible().map_err(internal)? {
+        window.hide().map_err(internal)
+    } else {
+        show_command_palette(app)
+    }
+}
+
+/// Center the palette window on the monitor containing the cursor, falling
+/// back to the primary monitor when the cursor is not on any known monitor
+/// (e.g. a monitor was unplugged). Cursor, monitor and window sizes are all
+/// reported in physical pixels, so the math is done without DPI conversion.
+fn center_on_cursor_or_primary(window: &WebviewWindow) -> AppResult<()> {
+    let cursor = window.cursor_position().ok();
+    let target = cursor
+        .and_then(|position| {
+            window
+                .monitor_from_point(position.x, position.y)
+                .ok()
+                .flatten()
+        })
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .ok_or_else(|| AppError::NotFound("no monitor available".into()))?;
+    let origin = target.position();
+    let size = target.size();
+    let outer = window.outer_size().map_err(internal)?;
+    let x = (origin.x + (size.width as i32 - outer.width as i32) / 2).max(0);
+    let y = (origin.y + (size.height as i32 - outer.height as i32) / 2).max(0);
+    window
+        .set_position(tauri::Position::Physical(PhysicalPosition::new(x, y)))
+        .map_err(internal)
 }
 
 pub fn show_note(app: &AppHandle, note: &Note, focus_body: bool) -> AppResult<()> {

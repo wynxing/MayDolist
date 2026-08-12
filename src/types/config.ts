@@ -5,6 +5,10 @@ export interface AppConfig {
   hotkey: string;
   quickCaptureHotkey: string;
   quickCaptureEnabled: boolean;
+  /** Global hotkey for the command palette window (default `Ctrl+K`). */
+  commandPaletteHotkey: string;
+  /** Whether the command palette window and its hotkey are enabled. */
+  commandPaletteEnabled: boolean;
   theme: "system" | "dark" | "light";
   githubRefreshIntervalMinutes: number;
   /** Days after which an open GitHub item is flagged "长期未更新"; 0 disables. */
