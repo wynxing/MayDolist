@@ -375,9 +375,10 @@ textarea.input {
 
 /* Todo */
 .todo-view {
-  width: min(100%, 760px);
+  width: min(100%, 980px);
   margin: 0 auto;
   padding-bottom: 12px;
+  overflow-x: clip;
 }
 
 .todo-topbar {
@@ -503,8 +504,7 @@ textarea.input {
   font-weight: 600;
 }
 
-.group-actions,
-.todo-item-actions {
+.group-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -513,9 +513,7 @@ textarea.input {
 }
 
 .todo-group:hover .group-actions,
-.todo-group:focus-within .group-actions,
-.todo-item:hover .todo-item-actions,
-.todo-item:focus-within .todo-item-actions {
+.todo-group:focus-within .group-actions {
   opacity: 1;
 }
 
@@ -555,8 +553,8 @@ textarea.input {
 .todo-item {
   min-height: 40px;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
   padding: 7px 8px;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -568,6 +566,14 @@ textarea.input {
   background: var(--card-hover);
 }
 
+.todo-item-main {
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .todo-item input[type="checkbox"] {
   accent-color: var(--accent);
   width: 17px;
@@ -577,7 +583,8 @@ textarea.input {
 }
 
 .todo-item-title {
-  flex: 1;
+  display: block;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -590,8 +597,73 @@ textarea.input {
   color: var(--muted);
 }
 
-.item-edit {
+.todo-item-content {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.todo-item-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.todo-schedule-summary {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.todo-details-toggle {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.todo-details-toggle:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.todo-item-details {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  margin: 7px 0 1px 27px;
+  padding: 10px 4px 2px 10px;
+  border-top: 1px solid var(--border);
+  cursor: default;
+}
+
+.todo-item-details.completed-details {
+  justify-content: flex-end;
+}
+
+.item-edit {
+  width: 100%;
   min-width: 0;
   padding: 4px 6px;
   border: 1px solid var(--accent);
@@ -608,6 +680,7 @@ textarea.input {
   background: transparent;
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .text-action {
@@ -633,6 +706,15 @@ textarea.input {
   max-width: 110px;
   padding: 4px 6px;
   cursor: pointer;
+}
+
+.todo-item-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .move-select option {
@@ -696,12 +778,13 @@ textarea.input {
     opacity: 1;
   }
 
+  .todo-item-details {
+    align-items: stretch;
+    margin-left: 0;
+  }
+
   .todo-item-actions {
-    opacity: 1;
-    max-width: none;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 8px;
+    width: 100%;
   }
 }
 
@@ -879,6 +962,8 @@ textarea.input {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .snapshot-header {
@@ -1333,28 +1418,39 @@ textarea.input {
   }
 }
 .filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); flex-wrap: wrap; }
-.gh-link { display: flex; flex: 1; min-width: 0; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; gap: 8px; align-items: baseline; }
+.gh-link { display: block; flex: 1; min-width: 0; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; }
 .gh-link:hover { background: var(--card-hover); }
-.gh-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gh-link small { margin-left: auto; color: var(--accent); flex: none; }
 .gh-link .gh-title-block {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-width: 0;
-  gap: 3px;
-  overflow: hidden;
+  gap: 4px;
 }
 .gh-link .gh-title {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.gh-link .gh-item-meta-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .gh-link .gh-signals {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  overflow: visible;
-  white-space: normal;
+  min-width: 0;
+}
+.gh-link .gh-link-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+  white-space: nowrap;
 }
 .gh-signal-badge {
   display: inline-block;
@@ -1445,8 +1541,9 @@ textarea.input {
 }
 .gh-item-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .gh-item-row.dimmed .gh-link {
   opacity: 0.55;
@@ -1830,7 +1927,7 @@ textarea.input {
 /* #19: GitHub -> Todo source badge and convert feedback */
 .todo-source {
   flex: none;
-  max-width: 220px;
+  max-width: min(220px, 38%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1944,18 +2041,31 @@ textarea.input {
   }
 }
 
-/* #29: Todo 行内到期 / 提醒 / 重复规则编辑 */
+/* #29: Todo 到期 / 提醒 / 重复规则编辑 */
 .todo-item-schedule {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 1 1 470px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.todo-item-schedule label {
+  flex: 1 1 130px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .todo-item-schedule input,
 .todo-item-schedule select {
-  max-width: 150px;
-  padding: 2px 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--field);
@@ -1964,7 +2074,7 @@ textarea.input {
 }
 
 .todo-item-schedule select {
-  max-width: 92px;
+  min-width: 96px;
 }
 
 .todo-item-schedule input:disabled {

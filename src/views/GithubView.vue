@@ -377,20 +377,22 @@ function convertLabel(key: string) {
             <button class="gh-link" type="button" @click="s.open(pr.url)">
               <span class="gh-title-block">
                 <span class="gh-title">#{{ pr.number }} {{ pr.title }}</span>
-                <span class="gh-signals">
-                  <span
-                    v-for="b in signalBadges(pr.signals)"
-                    :key="b.key"
-                    class="gh-signal-badge"
-                    :class="b.key"
-                  >
-                    {{ b.label }}
+                <span class="gh-item-meta-row">
+                  <span class="gh-signals">
+                    <span
+                      v-for="b in signalBadges(pr.signals)"
+                      :key="b.key"
+                      class="gh-signal-badge"
+                      :class="b.key"
+                    >
+                      {{ b.label }}
+                    </span>
                   </span>
+                  <small class="gh-link-meta">
+                    {{ matchLabel(pr.matches) }} · 更新 {{ formatTime(pr.updatedAt) }}
+                  </small>
                 </span>
               </span>
-              <small class="gh-link-meta">
-                {{ matchLabel(pr.matches) }} · 更新 {{ formatTime(pr.updatedAt) }}
-              </small>
             </button>
             <button
               class="btn ghost gh-convert"
@@ -436,20 +438,22 @@ function convertLabel(key: string) {
             <button class="gh-link" type="button" @click="s.open(issue.url)">
               <span class="gh-title-block">
                 <span class="gh-title">#{{ issue.number }} {{ issue.title }}</span>
-                <span class="gh-signals">
-                  <span
-                    v-for="b in signalBadges(issue.signals)"
-                    :key="b.key"
-                    class="gh-signal-badge"
-                    :class="b.key"
-                  >
-                    {{ b.label }}
+                <span class="gh-item-meta-row">
+                  <span class="gh-signals">
+                    <span
+                      v-for="b in signalBadges(issue.signals)"
+                      :key="b.key"
+                      class="gh-signal-badge"
+                      :class="b.key"
+                    >
+                      {{ b.label }}
+                    </span>
                   </span>
+                  <small class="gh-link-meta">
+                    {{ matchLabel(issue.matches) }} · 更新 {{ formatTime(issue.updatedAt) }}
+                  </small>
                 </span>
               </span>
-              <small class="gh-link-meta">
-                {{ matchLabel(issue.matches) }} · 更新 {{ formatTime(issue.updatedAt) }}
-              </small>
             </button>
             <button
               class="btn ghost gh-convert"

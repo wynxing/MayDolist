@@ -23,6 +23,9 @@ const newList = ref("");
 const drafts = ref<Record<string, string>>({});
 const completedOpen = ref<Record<string, boolean>>({});
 const editingItemId = ref<string | null>(null);
+const expandedItemId = ref<string | null>(null);
+const expandedItemListId = ref<string | null>(null);
+const expandedItemCompleted = ref<boolean | null>(null);
 const editingListId = ref<string | null>(null);
 const editDraft = ref("");
 const dragListId = ref<string | null>(null);
@@ -38,6 +41,23 @@ function pendingItems(list: TodoList) {
 
 function completedItems(list: TodoList) {
   return list.items.filter((item) => item.completed);
+}
+
+function closeItemDetails(itemId?: string) {
+  if (itemId && expandedItemId.value !== itemId) return;
+  expandedItemId.value = null;
+  expandedItemListId.value = null;
+  expandedItemCompleted.value = null;
+}
+
+function toggleItemDetails(listId: string, item: TodoItem) {
+  if (expandedItemId.value === item.id) {
+    closeItemDetails();
+    return;
+  }
+  expandedItemId.value = item.id;
+  expandedItemListId.value = listId;
+  expandedItemCompleted.value = item.completed;
 }
 
 async function addList() {
@@ -100,6 +120,12 @@ async function deleteList(list: TodoList) {
 async function deleteItem(item: TodoItem) {
   if (!window.confirm(`将待办“${item.title}”移入回收站？`)) return;
   await store.softDelete(item.id);
+  closeItemDetails(item.id);
+}
+
+async function toggleItemCompleted(item: TodoItem) {
+  await store.toggleItem(item.id, item.completed);
+  closeItemDetails(item.id);
 }
 
 /* ------------------------------------------------------------------ *
@@ -264,6 +290,29 @@ watch(inboxPending, () => {
   triageCurrentId.value = state.currentId;
 });
 
+// If another window removes or changes the completion state of the expanded item,
+// close stale details. Already-completed items can still be expanded normally.
+watch(
+  () => {
+    if (!expandedItemId.value) return null;
+    for (const list of store.lists) {
+      const item = list.items.find((candidate) => candidate.id === expandedItemId.value);
+      if (item) return { id: item.id, listId: list.id, completed: item.completed };
+    }
+    return null;
+  },
+  (item) => {
+    if (!expandedItemId.value) return;
+    if (
+      !item ||
+      item.listId !== expandedItemListId.value ||
+      item.completed !== expandedItemCompleted.value
+    ) {
+      closeItemDetails();
+    }
+  }
+);
+
 onMounted(() => {
   store.init();
   window.addEventListener("keydown", onTriageKeydown);
@@ -298,6 +347,28 @@ function localDateTimeValue(value: string | null | undefined) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
     d.getHours()
   )}:${pad2(d.getMinutes())}`;
+}
+
+function shortDateValue(value: string | null | undefined) {
+  const local = localDateValue(value);
+  if (!local) return "";
+  const [, month, day] = local.split("-");
+  return `${Number(month)}/${Number(day)}`;
+}
+
+function shortDateTimeValue(value: string | null | undefined) {
+  const local = localDateTimeValue(value);
+  if (!local) return "";
+  const [date, time] = local.split("T");
+  return `${shortDateValue(date)} ${time}`;
+}
+
+function scheduleSummaries(item: TodoItem) {
+  const summaries: string[] = [];
+  if (item.dueDate) summaries.push(`到期 ${shortDateValue(item.dueDate)}`);
+  if (item.remindAt) summaries.push(`提醒 ${shortDateTimeValue(item.remindAt)}`);
+  if (item.repeat) summaries.push(`重复 ${repeatLabel(item.repeat)}`);
+  return summaries;
 }
 
 function scheduleOf(item: TodoItem): TodoScheduleInput {
@@ -379,6 +450,7 @@ async function moveToList(itemId: string, targetListId: string) {
   const target = store.lists.find((list) => list.id === targetListId);
   if (!target) return;
   await store.moveItem(itemId, targetListId, target.items.length);
+  closeItemDetails(itemId);
 }
 
 function onListDragStart(event: DragEvent, id: string) {
@@ -445,7 +517,9 @@ function onItemDrop(event: DragEvent, targetListId: string, targetItemId?: strin
   const targetIndex = targetItemId
     ? targetList.items.findIndex((item) => item.id === targetItemId)
     : targetList.items.length;
-  if (targetIndex >= 0) void store.moveItem(dragged.id, targetListId, targetIndex);
+  if (targetIndex >= 0) {
+    void store.moveItem(dragged.id, targetListId, targetIndex);
+  }
 }
 
 function onItemDragEnd() {
@@ -681,95 +755,136 @@ function onItemDragEnd() {
             @drop="onItemDrop($event, list.id, item.id)"
             @dragend="onItemDragEnd"
           >
-            <input
-              :id="`todo-${item.id}`"
-              type="checkbox"
-              :checked="item.completed"
-              @change="store.toggleItem(item.id, item.completed)"
-            />
-            <input
-              v-if="editingItemId === item.id"
-              v-model="editDraft"
-              class="item-edit"
-              aria-label="待办标题"
-              autofocus
-              @keyup.enter="submitOnEnter($event, () => commitItemEdit(item))"
-              @keyup.esc="cancelItemEdit"
-              @blur="commitItemEdit(item)"
-            />
-            <label v-else class="todo-item-title" :for="`todo-${item.id}`" @dblclick="startItemEdit(item)">
-              {{ item.title }}
-            </label>
-            <span v-if="item.source" class="todo-source" :title="item.source.url">
-              {{ sourceLabel(item.source) }}
-            </span>
-            <div class="todo-item-schedule">
+            <div class="todo-item-main">
               <input
-                type="date"
-                :value="localDateValue(item.dueDate)"
-                :aria-label="`${item.title} 到期日`"
-                title="到期日"
-                @change="setDueDate(item, ($event.target as HTMLInputElement).value)"
+                :id="`todo-${item.id}`"
+                type="checkbox"
+                :checked="item.completed"
+                @change="toggleItemCompleted(item)"
               />
-              <input
-                type="datetime-local"
-                :value="localDateTimeValue(item.remindAt)"
-                :aria-label="`${item.title} 提醒时间`"
-                title="提醒时间（需设置到期日）"
-                :disabled="!item.dueDate"
-                @change="setRemindAt(item, ($event.target as HTMLInputElement).value)"
-              />
-              <select
-                :value="item.repeat ?? ''"
-                :aria-label="`${item.title} 重复规则`"
-                title="重复规则"
-                @change="setRepeat(item, ($event.target as HTMLSelectElement).value)"
+              <div class="todo-item-content">
+                <input
+                  v-if="editingItemId === item.id"
+                  v-model="editDraft"
+                  class="item-edit"
+                  aria-label="待办标题"
+                  autofocus
+                  @keyup.enter="submitOnEnter($event, () => commitItemEdit(item))"
+                  @keyup.esc="cancelItemEdit"
+                  @blur="commitItemEdit(item)"
+                />
+                <label
+                  v-else
+                  class="todo-item-title"
+                  :for="`todo-${item.id}`"
+                  @dblclick="startItemEdit(item)"
+                >
+                  {{ item.title }}
+                </label>
+                <div
+                  v-if="item.source || scheduleSummaries(item).length"
+                  class="todo-item-meta"
+                >
+                  <span v-if="item.source" class="todo-source" :title="item.source.url">
+                    {{ sourceLabel(item.source) }}
+                  </span>
+                  <span
+                    v-for="summary in scheduleSummaries(item)"
+                    :key="summary"
+                    class="todo-schedule-summary"
+                  >
+                    {{ summary }}
+                  </span>
+                </div>
+              </div>
+              <button
+                class="todo-details-toggle"
+                type="button"
+                :aria-expanded="expandedItemId === item.id"
+                :aria-controls="`todo-details-${item.id}`"
+                :aria-label="`${expandedItemId === item.id ? '收起' : '展开'}待办“${item.title}”的详细设置`"
+                @click="toggleItemDetails(list.id, item)"
               >
-                <option value="">不重复</option>
-                <option value="daily">每天</option>
-                <option value="weekly">每周</option>
-                <option value="biweekly">每两周</option>
-                <option value="monthly">每月</option>
-              </select>
+                <span aria-hidden="true">{{ expandedItemId === item.id ? "⌃" : "⌄" }}</span>
+              </button>
             </div>
-            <div class="todo-item-actions">
-              <button class="text-action" type="button" @click="startItemEdit(item)">编辑</button>
-              <button
-                v-if="item.source && isHttpUrl(item.source.url)"
-                class="text-action"
-                type="button"
-                :title="`打开来源 ${item.source.url}`"
-                @click="openSource(item)"
-              >
-                打开来源
-              </button>
-              <select
-                class="move-select"
-                :value="list.id"
-                :aria-label="`移动${item.title}到其他清单`"
-                @change="moveToList(item.id, ($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="target in store.lists" :key="target.id" :value="target.id">
-                  {{ target.id === list.id ? "移动到…" : target.title }}
-                </option>
-              </select>
-              <button
-                class="text-action"
-                type="button"
-                :disabled="itemIndex === 0"
-                @click="moveItem(list.id, item.id, -1)"
-              >
-                上移
-              </button>
-              <button
-                class="text-action"
-                type="button"
-                :disabled="itemIndex === pendingItems(list).length - 1"
-                @click="moveItem(list.id, item.id, 1)"
-              >
-                下移
-              </button>
-              <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
+            <div
+              v-if="expandedItemId === item.id"
+              :id="`todo-details-${item.id}`"
+              class="todo-item-details"
+            >
+              <div class="todo-item-schedule">
+                <label>
+                  <span>到期日</span>
+                  <input
+                    type="date"
+                    :value="localDateValue(item.dueDate)"
+                    @change="setDueDate(item, ($event.target as HTMLInputElement).value)"
+                  />
+                </label>
+                <label>
+                  <span>提醒时间</span>
+                  <input
+                    type="datetime-local"
+                    :value="localDateTimeValue(item.remindAt)"
+                    title="需先设置到期日"
+                    :disabled="!item.dueDate"
+                    @change="setRemindAt(item, ($event.target as HTMLInputElement).value)"
+                  />
+                </label>
+                <label>
+                  <span>重复规则</span>
+                  <select
+                    :value="item.repeat ?? ''"
+                    @change="setRepeat(item, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">不重复</option>
+                    <option value="daily">每天</option>
+                    <option value="weekly">每周</option>
+                    <option value="biweekly">每两周</option>
+                    <option value="monthly">每月</option>
+                  </select>
+                </label>
+              </div>
+              <div class="todo-item-actions">
+                <button class="text-action" type="button" @click="startItemEdit(item)">编辑</button>
+                <button
+                  v-if="item.source && isHttpUrl(item.source.url)"
+                  class="text-action"
+                  type="button"
+                  :title="`打开来源 ${item.source.url}`"
+                  @click="openSource(item)"
+                >
+                  打开来源
+                </button>
+                <select
+                  class="move-select"
+                  :value="list.id"
+                  :aria-label="`移动${item.title}到其他清单`"
+                  @change="moveToList(item.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="target in store.lists" :key="target.id" :value="target.id">
+                    {{ target.id === list.id ? "移动到…" : target.title }}
+                  </option>
+                </select>
+                <button
+                  class="text-action"
+                  type="button"
+                  :disabled="itemIndex === 0"
+                  @click="moveItem(list.id, item.id, -1)"
+                >
+                  上移
+                </button>
+                <button
+                  class="text-action"
+                  type="button"
+                  :disabled="itemIndex === pendingItems(list).length - 1"
+                  @click="moveItem(list.id, item.id, 1)"
+                >
+                  下移
+                </button>
+                <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
+              </div>
             </div>
           </li>
           <li
@@ -804,27 +919,59 @@ function onItemDragEnd() {
               @drop="onItemDrop($event, list.id, item.id)"
               @dragend="onItemDragEnd"
             >
-              <input
-                :id="`todo-${item.id}`"
-                type="checkbox"
-                :checked="item.completed"
-                @change="store.toggleItem(item.id, item.completed)"
-              />
-              <label class="todo-item-title" :for="`todo-${item.id}`">{{ item.title }}</label>
-              <span v-if="item.source" class="todo-source" :title="item.source.url">
-                {{ sourceLabel(item.source) }}
-              </span>
-              <div class="todo-item-actions">
+              <div class="todo-item-main">
+                <input
+                  :id="`todo-${item.id}`"
+                  type="checkbox"
+                  :checked="item.completed"
+                  @change="toggleItemCompleted(item)"
+                />
+                <div class="todo-item-content">
+                  <label class="todo-item-title" :for="`todo-${item.id}`">{{ item.title }}</label>
+                  <div
+                    v-if="item.source || scheduleSummaries(item).length"
+                    class="todo-item-meta"
+                  >
+                    <span v-if="item.source" class="todo-source" :title="item.source.url">
+                      {{ sourceLabel(item.source) }}
+                    </span>
+                    <span
+                      v-for="summary in scheduleSummaries(item)"
+                      :key="summary"
+                      class="todo-schedule-summary"
+                    >
+                      {{ summary }}
+                    </span>
+                  </div>
+                </div>
                 <button
-                  v-if="item.source && isHttpUrl(item.source.url)"
-                  class="text-action"
+                  class="todo-details-toggle"
                   type="button"
-                  :title="`打开来源 ${item.source.url}`"
-                  @click="openSource(item)"
+                  :aria-expanded="expandedItemId === item.id"
+                  :aria-controls="`todo-details-${item.id}`"
+                  :aria-label="`${expandedItemId === item.id ? '收起' : '展开'}待办“${item.title}”的详细设置`"
+                  @click="toggleItemDetails(list.id, item)"
                 >
-                  打开来源
+                  <span aria-hidden="true">{{ expandedItemId === item.id ? "⌃" : "⌄" }}</span>
                 </button>
-                <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
+              </div>
+              <div
+                v-if="expandedItemId === item.id"
+                :id="`todo-details-${item.id}`"
+                class="todo-item-details completed-details"
+              >
+                <div class="todo-item-actions">
+                  <button
+                    v-if="item.source && isHttpUrl(item.source.url)"
+                    class="text-action"
+                    type="button"
+                    :title="`打开来源 ${item.source.url}`"
+                    @click="openSource(item)"
+                  >
+                    打开来源
+                  </button>
+                  <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
+                </div>
               </div>
             </li>
           </ul>
