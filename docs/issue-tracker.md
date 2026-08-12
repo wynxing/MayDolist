@@ -182,4 +182,4 @@
 - #29 执行线程已创建并完成：threadId `019ff487-db47-7050-99ee-7a1da3a3b50c`，worktree `38d3`，分支 `codex/issue-29-due-reminder`；activeThreadId 已清除。
 - 完成证据：PR [#31](https://github.com/wynxing/MayDolist/pull/31)（CI 全绿，首次 5m27s，rebase 后 3m9s）→ squash 合并（merge commit `c23d994`）→ issue #29 自动关闭（2026-08-12 14:32 +08）。
 - 实现要点：TodoItem 新增可选 `dueDate` / `remindAt` / `repeat` / `repeatUntil`（serde 默认值向后兼容，落盘跳过 None）；Focus 按「已逾期 > 今天到期 > 近期 7 天 > 无日期」分组并输出分组元信息，逾期高亮 + 数量标识；后台调度到期提醒（Windows Toast，点击聚焦条目），托盘红色逾期数字徽标（0 隐藏）；完成周期任务时 service 层原子生成下一次实例（月末钳制，repeatUntil 停止，保留来源）；快速捕捉日期前缀解析（明天 / 周X / N天后 / 月底）；Todo 编辑 UI 设置/清除到期日与周期规则；配置新增可选安静时段 `quietHours`（跨午夜）；前端不直接写文件；cargo test 115 passed。
-- 下一轮：#30 全局命令面板（Ctrl+K），线程已即时创建（threadId `待回写`，worktree `待回写`，分支 `codex/issue-30-command-palette`），开场指令见本轮交接摘要。
+- 下一轮：#30 全局命令面板（Ctrl+K），线程已即时创建（threadId `019ff4b2-45f8-7783-af30-3afbb3037cd1`，worktree `09da`，分支 `codex/issue-30-command-palette`），开场指令见本轮交接摘要。
