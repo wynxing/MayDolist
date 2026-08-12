@@ -241,6 +241,23 @@ async function clearTrash() {
           </label>
         </div>
 
+        <label class="settings-row">
+          <span>命令面板快捷键</span>
+          <input
+            v-model="settings.config.commandPaletteHotkey"
+            class="input settings-control"
+            :disabled="!settings.config.commandPaletteEnabled"
+          />
+        </label>
+
+        <div class="settings-row">
+          <span>命令面板</span>
+          <label class="settings-switch">
+            <input v-model="settings.config.commandPaletteEnabled" type="checkbox" />
+            <span>启用全局命令面板（默认 Ctrl+K）</span>
+          </label>
+        </div>
+
         <div class="settings-row">
           <span>
             提醒安静时段

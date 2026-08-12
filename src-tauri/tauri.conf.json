@@ -54,6 +54,25 @@
           "effects": ["acrylic"],
           "radius": 12
         }
+      },
+      {
+        "label": "command-palette",
+        "title": "MayDolist 命令面板",
+        "url": "index.html?palette",
+        "width": 640,
+        "height": 440,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "windowEffects": {
+          "effects": ["acrylic"],
+          "radius": 12
+        }
       }
     ],
     "security": {

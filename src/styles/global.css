@@ -1986,3 +1986,243 @@ textarea.input {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* #30: 全局命令面板窗口（见 views/CommandPalette.vue）。 */
+.palette {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-image: var(--glass-tint);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+  backdrop-filter: var(--glass-blur) var(--glass-saturate);
+  -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+}
+
+.palette-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--field);
+}
+
+.palette-prefix {
+  flex: none;
+  color: var(--accent);
+  font-size: 18px;
+  opacity: 0.85;
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--field);
+  color: var(--text);
+  outline: none;
+}
+
+.palette-input:focus {
+  border-color: var(--accent);
+  background: var(--card-strong);
+}
+
+.palette-input::placeholder {
+  color: var(--muted);
+}
+
+.palette-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.palette-close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.palette-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px 8px;
+}
+
+.palette-section {
+  margin-top: 8px;
+}
+
+.palette-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 10px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.palette-offline {
+  color: #f5b044;
+  text-transform: none;
+}
+
+:root[data-theme="light"] .palette-offline {
+  color: #9a5b00;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.palette-row:hover {
+  background: var(--card-hover);
+}
+
+.palette-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.palette-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.palette-row-hint,
+.palette-row-meta {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.palette-row-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.palette-row:hover .palette-row-actions,
+.palette-row.selected .palette-row-actions {
+  opacity: 1;
+}
+
+.palette-action {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.palette-action:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+
+.palette-badge {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+.palette-badge.issue {
+  background: rgba(245, 158, 11, 0.16);
+  color: #f5b044;
+}
+
+:root[data-theme="light"] .palette-badge.issue {
+  color: #9a5b00;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 22px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.palette-error {
+  margin: 8px 10px 0;
+  color: var(--danger);
+  font-size: 12px;
+  user-select: text;
+}
+
+.palette-feedback {
+  margin: 8px 10px 0;
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.palette-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.palette-keys {
+  flex: none;
+  opacity: 0.75;
+}

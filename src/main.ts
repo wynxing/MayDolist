@@ -8,6 +8,6 @@ const pinia = createPinia();
 createApp(App).use(pinia).mount("#app");
 
 const params = new URLSearchParams(location.search);
-if (!params.has("note") && !params.has("quick")) {
+if (!params.has("note") && !params.has("quick") && !params.has("palette")) {
   void useUpdateStore(pinia).init();
 }

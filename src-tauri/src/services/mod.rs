@@ -3,6 +3,7 @@ pub mod backup;
 pub mod focus;
 pub mod github;
 pub mod note;
+pub mod palette;
 pub mod reminder;
 pub mod todo;
 use crate::storage::Storage;
@@ -12,6 +13,7 @@ pub struct Services {
     pub note: Arc<note::NoteService>,
     pub github: Arc<github::GithubService>,
     pub focus: Arc<focus::FocusService>,
+    pub palette: Arc<palette::PaletteService>,
 }
 impl Services {
     pub fn new(storage: Arc<Storage>) -> Self {
@@ -23,6 +25,11 @@ impl Services {
         let todo = Arc::new(todo::TodoService::new(storage.clone()));
         let note = Arc::new(note::NoteService::new(storage.clone()));
         let github = Arc::new(github::GithubService::new_with_mode(storage, demo_mode));
+        let palette = Arc::new(palette::PaletteService::new(
+            todo.clone(),
+            note.clone(),
+            github.clone(),
+        ));
         Self {
             backup,
             focus: Arc::new(focus::FocusService::new(
@@ -33,6 +40,7 @@ impl Services {
             todo,
             note,
             github,
+            palette,
         }
     }
 }

@@ -25,6 +25,15 @@ MayDolist 适合那些需要在编码、Review 和日常工作之间快速切换
 - `Enter` 提交，`Esc` 或右上角关闭按钮收起窗口；未提交的输入会保留。
 - `Ctrl+Alt+M` 或屏幕热角呼出 / 隐藏主面板。
 
+### 全局命令面板（Ctrl+K）
+
+在任何时候按 `Ctrl+K` 都会呼出轻量命令面板（快捷键可在设置中修改或关闭）：
+
+- 输入命令名直接执行：切换今日 / 待办 / 便签 / GitHub / 设置，新建 Todo、新建便签，立即备份或打开数据目录。
+- 输入任意关键词即搜即得（防抖 150ms）：并发检索未完成 Todo（含收件箱）、便签全文和 GitHub 本地缓存条目，结果按域分组，每域最多 8 条。
+- 对搜索结果就地操作：完成 Todo、打开来源、跳转对应模块、置顶便签；GitHub 离线时只显示本地缓存并标注「离线缓存」。
+- `↑` / `↓` 选择、`Enter` 执行、`Esc` 关闭；中文输入法组合输入不会误触发执行。
+
 ### Todo 与便签
 
 Todo 支持多个清单、完成、排序、软删除和 GitHub 来源关联；每条待办还可以设置到期日、提醒时间与周期规则（每天 / 每周 / 每两周 / 每月）——完成周期任务后自动生成下一次实例，直到重复截止日。到期的任务会通过 Windows 通知提醒你，点击通知直接打开面板并聚焦该条待办；通知不可用或处于安静时段时，托盘图标会显示红色逾期数字徽标（0 时自动隐藏）。便签支持搜索、标签、置顶、自动保存，也可以拖出为独立桌面悬浮窗。
@@ -128,11 +137,11 @@ flowchart LR
 src/
   api/                 Tauri command 的前端封装
   stores/              Pinia 状态
-  views/               今日、Todo、便签、GitHub、设置和快速收集
+  views/               今日、Todo、便签、GitHub、设置、快速收集和命令面板
   types/               与 Rust model 对应的 TypeScript 类型
 src-tauri/src/
   commands/            Tauri command 接口
-  services/            Todo、便签、GitHub、Focus、提醒和备份服务
+  services/            Todo、便签、GitHub、Focus、提醒、备份和命令面板搜索服务
   models/              serde 数据模型
   storage/             数据目录、原子写入和迁移
   demo.rs              截图用的隔离模拟数据
@@ -163,7 +172,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 项目状态
 
-当前版本：`1.2.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪、快速收集（含日期前缀解析）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
+当前版本：`1.2.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 

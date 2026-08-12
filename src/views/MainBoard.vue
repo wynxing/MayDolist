@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { call } from "../api";
+import { openNoteInModule } from "../navigation";
 import { useFocusStore } from "../stores/focus";
 import { useSettingsStore } from "../stores/settings";
 
@@ -49,6 +50,11 @@ onMounted(async () => {
     // Notification click: open the Focus tab and highlight the item.
     active.value = "focus";
     focus.requestFocus(e.payload);
+  });
+  await listen<{ tab: string; noteId?: string }>("command-palette-navigate", (e) => {
+    // Command palette action: switch tabs, optionally opening a specific note.
+    if (e.payload.noteId) openNoteInModule(e.payload.noteId);
+    active.value = e.payload.tab;
   });
 });
 </script>
