@@ -15,7 +15,7 @@
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
 | #20 | GitHub 可行动信号 | #18/#19 | ✅ 已完成 | `codex/issue-20-action-signals` | [#25](https://github.com/wynxing/MayDolist/pull/25) | CI 绿 + 已合并 + issue 自动关闭 |
 | #21 | 备份 / 导入 / 恢复 | 无 | ✅ 已完成 | `codex/issue-21-backup-restore` | [#26](https://github.com/wynxing/MayDolist/pull/26) | CI 绿 + 已合并 + issue 自动关闭 |
-| #29 | Todo 支持到期日、提醒与周期性任务 | 无 | 🚧 编排中 | `codex/issue-29-due-reminder` | 待创建 | 顺序 1：先做（地基） |
+| #29 | Todo 支持到期日、提醒与周期性任务 | 无 | ✅ 已完成 | `codex/issue-29-due-reminder` | [#31](https://github.com/wynxing/MayDolist/pull/31) | CI 全绿 + 已合并（merge commit `c23d994`）+ issue 自动关闭 |
 | #30 | 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 | `codex/issue-30-command-palette` | 待创建 | 顺序 2：独立 |
 | #28 | Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 | `codex/issue-28-inbox-triage` | 待创建 | 顺序 3：依赖 #29 |
 
@@ -168,7 +168,7 @@
 
 | Issue | 标题 | 依赖 | 状态 |
 | --- | --- | --- | --- |
-| [#29](https://github.com/wynxing/MayDolist/issues/29) | feat: Todo 支持到期日、提醒与周期性任务 | 无 | 🚧 编排中 |
+| [#29](https://github.com/wynxing/MayDolist/issues/29) | feat: Todo 支持到期日、提醒与周期性任务 | 无 | ✅ 已完成 |
 | [#30](https://github.com/wynxing/MayDolist/issues/30) | feat: 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 |
 | [#28](https://github.com/wynxing/MayDolist/issues/28) | feat: Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 |
 
@@ -177,7 +177,9 @@
 - #28 与 #29 设计上松耦合：#28 的“今天做 / 稍后做”在 #29 未实现时降级为移动列表，不阻塞；#28 将消费 #29 的 dueDate。
 - 失败策略：某轮同因失败连续 3 次 → 暂停自动化并通知用户，绝不跳过 issue；并发去重：创建线程前校验 activeThreadId。
 
-### 轮次 1（#29，创建中，2026-08-12）
+### 轮次 1（#29，已完成，2026-08-12）
 
-- #29 执行线程已创建：threadId `019ff487-db47-7050-99ee-7a1da3a3b50c`，worktree `38d3`，分支 `codex/issue-29-due-reminder`。
-- 首轮由当前会话手动创建（控制器激活后每小时兜底巡检，按 activeThreadId 去重）。
+- #29 执行线程已创建并完成：threadId `019ff487-db47-7050-99ee-7a1da3a3b50c`，worktree `38d3`，分支 `codex/issue-29-due-reminder`；activeThreadId 已清除。
+- 完成证据：PR [#31](https://github.com/wynxing/MayDolist/pull/31)（CI 全绿，首次 5m27s，rebase 后 3m9s）→ squash 合并（merge commit `c23d994`）→ issue #29 自动关闭（2026-08-12 14:32 +08）。
+- 实现要点：TodoItem 新增可选 `dueDate` / `remindAt` / `repeat` / `repeatUntil`（serde 默认值向后兼容，落盘跳过 None）；Focus 按「已逾期 > 今天到期 > 近期 7 天 > 无日期」分组并输出分组元信息，逾期高亮 + 数量标识；后台调度到期提醒（Windows Toast，点击聚焦条目），托盘红色逾期数字徽标（0 隐藏）；完成周期任务时 service 层原子生成下一次实例（月末钳制，repeatUntil 停止，保留来源）；快速捕捉日期前缀解析（明天 / 周X / N天后 / 月底）；Todo 编辑 UI 设置/清除到期日与周期规则；配置新增可选安静时段 `quietHours`（跨午夜）；前端不直接写文件；cargo test 115 passed。
+- 下一轮：#30 全局命令面板（Ctrl+K），线程已即时创建（threadId `待回写`，worktree `待回写`，分支 `codex/issue-30-command-palette`），开场指令见本轮交接摘要。
