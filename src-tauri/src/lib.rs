@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod demo;
 mod error;
 mod events;
 mod logging;
@@ -23,7 +24,12 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let storage = match Storage::new() {
+    let demo_mode = std::env::args().any(|arg| arg == "--demo");
+    let storage = match if demo_mode {
+        demo::create_storage()
+    } else {
+        Storage::new()
+    } {
         Ok(storage) => Arc::new(storage),
         Err(err) => {
             eprintln!("[MayDolist] failed to initialize storage: {err}");
@@ -59,7 +65,7 @@ pub fn run() {
         })
         .manage(AppState {
             storage: storage.clone(),
-            services: Services::new(storage),
+            services: Services::new_with_mode(storage, demo_mode),
             log,
         })
         .invoke_handler(tauri::generate_handler![

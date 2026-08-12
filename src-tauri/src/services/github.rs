@@ -20,6 +20,7 @@ const DEFAULT_STALE_DAYS: u32 = 14;
 
 pub struct GithubService {
     storage: Arc<Storage>,
+    demo_mode: bool,
     refreshing: Mutex<HashSet<String>>,
     /// Cached auth status; only "authenticated" results are cached so that a
     /// later `gh auth login` is still picked up on the next check.
@@ -27,14 +28,28 @@ pub struct GithubService {
 }
 impl GithubService {
     pub fn new(storage: Arc<Storage>) -> Self {
+        Self::new_with_mode(storage, false)
+    }
+
+    pub fn new_with_mode(storage: Arc<Storage>, demo_mode: bool) -> Self {
         Self {
             storage,
+            demo_mode,
             refreshing: Mutex::new(HashSet::new()),
             auth_cache: Mutex::new(None),
         }
     }
 
     pub fn status(&self) -> GhAuthStatus {
+        if self.demo_mode {
+            return GhAuthStatus {
+                state: "demo".into(),
+                logged_in: true,
+                user: Some("demo-user".into()),
+                version: Some("Demo data · no network".into()),
+                message: "Demo 模式：使用模拟 GitHub 数据".into(),
+            };
+        }
         if let Some(cached) = self.auth_cache.lock().ok().and_then(|v| v.clone()) {
             return cached;
         }
@@ -97,7 +112,9 @@ impl GithubService {
     }
     pub fn add_watch(&self, name: String) -> AppResult<Vec<RepoWatch>> {
         let full_name = normalize_repo(&name)?;
-        run_gh(&["api", &format!("repos/{full_name}"), "--jq", ".full_name"])?;
+        if !self.demo_mode {
+            run_gh(&["api", &format!("repos/{full_name}"), "--jq", ".full_name"])?;
+        }
         let mut list = self.watchlist()?;
         if !list
             .iter()
@@ -200,6 +217,11 @@ impl GithubService {
     }
 
     pub fn pin_item(&self, name: &str, number: u64) -> AppResult<RepoSnapshot> {
+        if self.demo_mode {
+            return self
+                .snapshot(name)?
+                .ok_or_else(|| AppError::Github("Demo 仓库没有模拟快照".into()));
+        }
         let full_name = normalize_repo(name)?;
         let fetched = self.fetch_issue_or_pr(&full_name, number)?;
         let mut list = self.watchlist()?;
@@ -276,6 +298,11 @@ impl GithubService {
     }
 
     pub fn refresh(&self, repo: &str) -> AppResult<RepoSnapshot> {
+        if self.demo_mode {
+            return self
+                .snapshot(repo)?
+                .ok_or_else(|| AppError::Github("Demo 仓库没有模拟快照".into()));
+        }
         normalize_repo(repo)?;
         {
             let mut lock = self
