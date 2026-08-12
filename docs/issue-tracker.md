@@ -189,4 +189,4 @@
 - #30 执行线程已创建并完成：threadId `019ff4b2-45f8-7783-af30-3afbb3037cd1`，worktree `09da`，分支 `codex/issue-30-command-palette`；activeThreadId 已清除。
 - 完成证据：PR [#32](https://github.com/wynxing/MayDolist/pull/32)（CI 首次失败为测试环境差异：CI runner 未安装 gh，离线断言依赖本地登录态；修复为确定性断言后 3m3s 全绿）→ squash 合并（merge commit `51dfec6`）→ issue #30 自动关闭（2026-08-12 15:04 +08）。
 - 实现要点：配置新增可选 `commandPaletteHotkey`（默认 `Ctrl+K`）/ `commandPaletteEnabled`（serde 默认值向后兼容，旧配置自动补齐）；Rust app 层注册全局快捷键，复用轻量无边框窗口框架创建 `command-palette` 窗口（呼出居中于光标所在屏、回退主屏，与快速捕捉并存互不影响）；`palette_search` 并发检索 Todo（未完成，含收件箱）/ 便签全文 / GitHub 本地缓存并按域限制 8 条，离线只读缓存并标注「离线缓存」；命令列表（切换 Tab / 新建 Todo / 新建便签 / 立即备份 / 打开数据目录）与结果动作（完成 / 打开来源 / 跳转模块 / 置顶便签）全部复用现有 command 与 stores，不新增写路径、前端不直接写文件；输入即搜防抖 150ms、↑/↓/Enter/Esc、输入法组合输入不触发执行、空结果显示引导文案、长标题截断；设置页可修改或关闭快捷键（冲突 / 非法配置保存时报错）；文档同步更新 architecture.md 与 README.md；cargo test 130 passed。
-- 下一轮：#28 Inbox 逐条处理模式（triage），线程已即时创建（threadId `待回写`，worktree `待回写`，分支 `codex/issue-28-inbox-triage`），开场指令见本轮交接摘要。
+- 下一轮：#28 Inbox 逐条处理模式（triage），线程已即时创建（threadId `019ff4d1-e0ae-7de0-bbaf-1c4a36bd70d5`，worktree `d6dd`，分支 `codex/issue-28-inbox-triage`），开场指令见本轮交接摘要。
