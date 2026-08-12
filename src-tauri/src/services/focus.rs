@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use chrono::NaiveDate;
+
 use crate::events::now_rfc3339;
 use crate::models::{
-    FocusGithub, FocusNote, FocusOverview, FocusSection, FocusSectionState, FocusTodo,
-    GhAuthStatus, Note, RepoSnapshot, RepoWatch, TodoList,
+    parse_due_date, FocusGithub, FocusNote, FocusOverview, FocusSection, FocusSectionState,
+    FocusTodo, FocusTodoGroup, FocusTodoSection, GhAuthStatus, Note, RepoSnapshot, RepoWatch,
+    TodoList,
 };
 use crate::services::github::GithubService;
 use crate::services::note::NoteService;
@@ -36,14 +39,14 @@ impl FocusService {
     pub fn overview(&self) -> FocusOverview {
         let generated_at = now_rfc3339();
         std::thread::scope(|scope| {
-            let todo = scope.spawn(|| self.load_todo());
+            let todo = scope.spawn(|| self.load_todo_section());
             let note = scope.spawn(|| self.load_note());
             let github = scope.spawn(|| self.load_github());
             FocusOverview {
                 generated_at,
                 todo: todo
                     .join()
-                    .unwrap_or_else(|_| FocusSection::error("todo loader panicked".into())),
+                    .unwrap_or_else(|_| FocusTodoSection::error("todo loader panicked".into())),
                 note: note
                     .join()
                     .unwrap_or_else(|_| FocusSection::error("note loader panicked".into())),
@@ -54,20 +57,25 @@ impl FocusService {
         })
     }
 
-    fn load_todo(&self) -> FocusSection<FocusTodo> {
+    fn load_todo_section(&self) -> FocusTodoSection {
         match self.todo.list(false) {
             Ok(lists) => {
                 let items = project_todos(&lists);
                 let total = items.len();
-                FocusSection {
+                let groups = group_todos(items, chrono::Local::now().date_naive());
+                FocusTodoSection {
                     state: FocusSectionState::Ready,
                     error: None,
                     total,
-                    offline_cache: false,
-                    items: items.into_iter().take(MAX_TODOS).collect(),
+                    groups,
                 }
             }
-            Err(err) => FocusSection::error(err.to_string()),
+            Err(err) => FocusTodoSection {
+                state: FocusSectionState::Error,
+                error: Some(err.to_string()),
+                total: 0,
+                groups: Vec::new(),
+            },
         }
     }
 
@@ -131,6 +139,17 @@ impl<T> FocusSection<T> {
     }
 }
 
+impl FocusTodoSection {
+    fn error(message: String) -> Self {
+        Self {
+            state: FocusSectionState::Error,
+            error: Some(message),
+            total: 0,
+            groups: Vec::new(),
+        }
+    }
+}
+
 /// Incomplete, non-deleted Todo items. Inbox lists come first; within each
 /// group the existing list/item order (sort order) is preserved, so the input
 /// must already be sorted like `TodoService::list`.
@@ -153,12 +172,69 @@ pub fn project_todos(lists: &[TodoList]) -> Vec<FocusTodo> {
                 inbox,
                 updated_at: item.updated_at.clone(),
                 source: item.source.clone(),
+                due_date: item.due_date.clone(),
+                remind_at: item.remind_at.clone(),
+                repeat: item.repeat,
             });
         }
     }
     // Stable sort keeps list/item sort order inside each inbox group.
     items.sort_by_key(|item| !item.inbox);
     items
+}
+
+/// Group incomplete todos by due state and sort within each group:
+/// 已逾期 (due < today, oldest first) → 今天到期 (by due time) →
+/// 近期 7 天 (due <= today + 7, by due date) → 无日期 (inbox first).
+/// Unparseable due dates degrade to the "无日期" group. The display cap is
+/// applied across groups in priority order; only non-empty groups are
+/// returned.
+pub fn group_todos(items: Vec<FocusTodo>, today: NaiveDate) -> Vec<FocusTodoGroup> {
+    let mut overdue = Vec::new();
+    let mut today_group = Vec::new();
+    let mut soon = Vec::new();
+    let mut none = Vec::new();
+    for item in items {
+        match item.due_date.as_deref().and_then(parse_due_date) {
+            Some(due) if due < today => overdue.push(item),
+            Some(due) if due == today => today_group.push(item),
+            Some(due) if due <= today + chrono::Duration::days(7) => soon.push(item),
+            _ => none.push(item),
+        }
+    }
+    let due_of = |item: &FocusTodo| item.due_date.as_deref().and_then(parse_due_date);
+    overdue.sort_by_key(|item| due_of(item));
+    today_group.sort_by_key(|item| due_of(item));
+    soon.sort_by_key(|item| due_of(item));
+    // Stable: keeps the original inbox-first / sort-order layout.
+    none.sort_by_key(|item| !item.inbox);
+
+    let mut groups = Vec::new();
+    let mut remaining = MAX_TODOS;
+    for (key, title, mut items) in [
+        ("overdue", "已逾期", overdue),
+        ("today", "今天到期", today_group),
+        ("soon", "近期 7 天", soon),
+        ("none", "无日期", none),
+    ] {
+        if items.is_empty() {
+            continue;
+        }
+        let count = items.len();
+        let take = items.len().min(remaining);
+        items.truncate(take);
+        remaining -= take;
+        groups.push(FocusTodoGroup {
+            key: key.into(),
+            title: title.into(),
+            count,
+            items,
+        });
+        if remaining == 0 {
+            break;
+        }
+    }
+    groups
 }
 
 /// Pinned notes first (by `updated_at` descending), then the most recently
@@ -314,6 +390,10 @@ mod tests {
             created_at: "2026-08-01T00:00:00Z".into(),
             updated_at: format!("2026-08-01T00:00:0{order}Z"),
             source: None,
+            due_date: None,
+            remind_at: None,
+            repeat: None,
+            repeat_until: None,
         }
     }
 
@@ -446,6 +526,86 @@ mod tests {
         assert_eq!(source.repo, "owner/repo");
         assert_eq!(source.number, 12);
         assert_eq!(items[0].source.as_ref().unwrap().url, source.url);
+    }
+
+    #[test]
+    fn group_todos_orders_overdue_today_soon_none() {
+        let mut inbox = todo_list("inbox", "收件箱", Some(INBOX_KIND), 0);
+        inbox.items = vec![
+            todo_item("none-1", "无日期", false, 0),
+            todo_item("overdue-1", "逾期较早", false, 1),
+            todo_item("today-1", "今天到期", false, 2),
+            todo_item("soon-1", "三天后", false, 3),
+            todo_item("soon-2", "七天后", false, 4),
+            todo_item("overdue-2", "逾期较晚", false, 5),
+        ];
+        for item in &mut inbox.items {
+            item.due_date = match item.title.as_str() {
+                "逾期较早" => Some("2026-08-10".into()),
+                "逾期较晚" => Some("2026-08-11".into()),
+                "今天到期" => Some("2026-08-12".into()),
+                "三天后" => Some("2026-08-15".into()),
+                "七天后" => Some("2026-08-19".into()),
+                _ => None,
+            };
+        }
+        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+        let groups = group_todos(project_todos(&[inbox]), today);
+        let keys: Vec<&str> = groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(keys, vec!["overdue", "today", "soon", "none"]);
+        assert_eq!(groups[0].title, "已逾期");
+        assert_eq!(groups[0].count, 2);
+        // Overdue sorted oldest first; today and soon by due date ascending.
+        let overdue_ids: Vec<&str> = groups[0].items.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(overdue_ids, vec!["overdue-1", "overdue-2"]);
+        assert_eq!(groups[1].items[0].id, "today-1");
+        let soon_ids: Vec<&str> = groups[2].items.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(soon_ids, vec!["soon-1", "soon-2"]);
+        assert_eq!(groups[3].items[0].id, "none-1");
+    }
+
+    #[test]
+    fn group_todos_degrades_unparseable_dates_to_none_and_caps() {
+        let mut inbox = todo_list("inbox", "收件箱", Some(INBOX_KIND), 0);
+        inbox.items = vec![
+            todo_item("bad-1", "坏日期", false, 0),
+            todo_item("over-1", "逾期", false, 1),
+        ];
+        inbox.items[0].due_date = Some("not-a-date".into());
+        inbox.items[1].due_date = Some("2026-08-01".into());
+        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+        let groups = group_todos(project_todos(&[inbox]), today);
+        assert_eq!(groups[0].key, "overdue");
+        assert_eq!(groups[1].key, "none");
+        assert_eq!(groups[1].items[0].id, "bad-1");
+
+        // Cap applies across groups in priority order.
+        let mut capped = todo_list("capped", "收件箱", Some(INBOX_KIND), 0);
+        for i in 0..=MAX_TODOS {
+            let mut item = todo_item(&format!("o{i}"), &format!("逾期{i}"), false, i as i32);
+            item.due_date = Some("2026-08-01".into());
+            capped.items.push(item);
+        }
+        let groups = group_todos(project_todos(&[capped]), today);
+        assert_eq!(groups.len(), 1, "cap is consumed by the first group");
+        assert_eq!(groups[0].count, MAX_TODOS + 1);
+        assert_eq!(groups[0].items.len(), MAX_TODOS);
+    }
+
+    #[test]
+    fn group_todos_carries_due_and_repeat_fields() {
+        let mut inbox = todo_list("inbox", "收件箱", Some(INBOX_KIND), 0);
+        let mut item = todo_item("r1", "每周任务", false, 0);
+        item.due_date = Some("2026-08-12".into());
+        item.remind_at = Some("2026-08-12T09:00:00+08:00".into());
+        item.repeat = Some(crate::models::RepeatRule::Weekly);
+        inbox.items = vec![item];
+        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+        let groups = group_todos(project_todos(&[inbox]), today);
+        let shown = &groups[0].items[0];
+        assert_eq!(shown.due_date.as_deref(), Some("2026-08-12"));
+        assert_eq!(shown.repeat, Some(crate::models::RepeatRule::Weekly));
+        assert!(shown.remind_at.is_some());
     }
 
     #[test]
@@ -633,20 +793,35 @@ mod tests {
         let inbox = services.todo.ensure_inbox().unwrap();
         services
             .todo
-            .create_item(&inbox.id, "收件箱任务".into(), None)
+            .create_item(
+                &inbox.id,
+                "收件箱任务".into(),
+                None,
+                crate::services::todo::TodoSchedule::default(),
+            )
             .unwrap();
         let work = services.todo.create_list("工作".into()).unwrap();
         services
             .todo
-            .create_item(&work.id, "工作任务".into(), None)
+            .create_item(
+                &work.id,
+                "工作任务".into(),
+                None,
+                crate::services::todo::TodoSchedule::default(),
+            )
             .unwrap();
         let done = services
             .todo
-            .create_item(&work.id, "已完成".into(), None)
+            .create_item(
+                &work.id,
+                "已完成".into(),
+                None,
+                crate::services::todo::TodoSchedule::default(),
+            )
             .unwrap();
         services
             .todo
-            .update_item(&done.id, None, Some(true), None)
+            .update_item(&done.id, None, Some(true), None, None)
             .unwrap();
         let pinned_note = services
             .note
@@ -690,7 +865,14 @@ mod tests {
         let overview = services.focus.overview();
         assert_eq!(overview.todo.state, FocusSectionState::Ready);
         assert_eq!(overview.todo.total, 2);
-        assert!(overview.todo.items[0].inbox);
+        let flat: Vec<&FocusTodo> = overview
+            .todo
+            .groups
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .collect();
+        assert_eq!(flat.len(), 2);
+        assert!(flat[0].inbox);
         assert_eq!(overview.note.items.len(), 1);
         assert!(overview.note.items[0].pinned);
         assert_eq!(overview.github.items.len(), 1);

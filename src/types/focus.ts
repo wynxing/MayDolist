@@ -1,5 +1,5 @@
 import type { ActionSignal } from "./github";
-import type { TodoSource } from "./todo";
+import type { RepeatRule, TodoSource } from "./todo";
 
 /** Mirrors Rust `models::focus::FocusSectionState`. */
 export type FocusSectionState = "ready" | "error";
@@ -14,6 +14,29 @@ export interface FocusTodo {
   updatedAt: string;
   /** Optional GitHub source; `null` for plain todos. */
   source: TodoSource | null;
+  /** Optional due date (`YYYY-MM-DD` or RFC3339); used for grouping. */
+  dueDate: string | null;
+  /** Optional reminder time (RFC3339), carried for display. */
+  remindAt: string | null;
+  /** Optional repeat rule of the source item. */
+  repeat: RepeatRule | null;
+}
+
+/** One due-state group (key: `overdue` / `today` / `soon` / `none`). */
+export interface FocusTodoGroup {
+  key: string;
+  title: string;
+  count: number;
+  items: FocusTodo[];
+}
+
+/** Todo section of the Focus projection, grouped by due state. */
+export interface FocusTodoSection {
+  state: FocusSectionState;
+  error: string | null;
+  /** Total incomplete todos before the display cap. */
+  total: number;
+  groups: FocusTodoGroup[];
 }
 
 /** One pinned or recently-updated Note in the Focus projection. */
@@ -53,7 +76,7 @@ export interface FocusSection<T> {
 
 export interface FocusOverview {
   generatedAt: string;
-  todo: FocusSection<FocusTodo>;
+  todo: FocusTodoSection;
   note: FocusSection<FocusNote>;
   github: FocusSection<FocusGithub>;
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AppError, AppResult};
+
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
 
 /// Allowed range for glass background opacity (40%..=100%).
@@ -33,6 +35,67 @@ where
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+/// Optional quiet window for due reminders: no toast is shown between
+/// `start` and `end` (local `HH:MM`, 24h). A window that crosses midnight
+/// (e.g. 22:00–07:00) is supported. Invalid or equal start/end values are
+/// treated as "no quiet hours" so a hand-edited config never blocks toasts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuietHours {
+    pub start: String,
+    pub end: String,
+}
+
+impl QuietHours {
+    /// Parse an `HH:MM` value into `(hours, minutes)`.
+    pub fn parse_time(value: &str) -> Option<(u32, u32)> {
+        let mut parts = value.split(':');
+        let hours: u32 = parts.next()?.trim().parse().ok()?;
+        let minutes: u32 = parts.next()?.trim().parse().ok()?;
+        if parts.next().is_some() || hours > 23 || minutes > 59 {
+            return None;
+        }
+        Some((hours, minutes))
+    }
+
+    pub fn is_valid(&self) -> bool {
+        Self::parse_time(&self.start).is_some() && Self::parse_time(&self.end).is_some()
+    }
+
+    /// Whether `now` falls inside the quiet window (end-exclusive; an
+    /// equal start/end or unparseable values mean "no quiet hours").
+    pub fn contains(&self, now: chrono::NaiveTime) -> bool {
+        let (Some((sh, sm)), Some((eh, em))) =
+            (Self::parse_time(&self.start), Self::parse_time(&self.end))
+        else {
+            return false;
+        };
+        let Some(start) = chrono::NaiveTime::from_hms_opt(sh, sm, 0) else {
+            return false;
+        };
+        let Some(end) = chrono::NaiveTime::from_hms_opt(eh, em, 0) else {
+            return false;
+        };
+        if start == end {
+            return false;
+        }
+        if start < end {
+            now >= start && now < end
+        } else {
+            now >= start || now < end
+        }
+    }
+
+    pub fn validate(&self) -> AppResult<()> {
+        if !self.is_valid() {
+            return Err(AppError::InvalidInput(
+                "quiet hours must be HH:MM values (24h)".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Single-instance application config, stored as `config.json` in the data dir.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +117,10 @@ pub struct AppConfig {
     /// 0 disables the stale signal.
     #[serde(default = "default_github_stale_days")]
     pub github_stale_days: u32,
+    /// Optional quiet window for due reminders; `None` keeps reminders
+    /// always enabled (legacy behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<QuietHours>,
     pub theme: String,
     pub github_refresh_interval_minutes: u32,
     pub autostart: bool,
@@ -91,10 +158,19 @@ impl AppConfig {
         } else {
             default_floating_note_glass_opacity()
         };
+        let quiet_before = self.quiet_hours.clone();
+        if self
+            .quiet_hours
+            .as_ref()
+            .is_some_and(|quiet| !quiet.is_valid())
+        {
+            self.quiet_hours = None;
+        }
         schema_before != self.schema_version
             || quick_hotkey_before != self.quick_capture_hotkey
             || main_before != self.main_window_glass_opacity
             || floating_before != self.floating_note_glass_opacity
+            || quiet_before != self.quiet_hours
     }
 }
 
@@ -108,6 +184,7 @@ impl Default for AppConfig {
             quick_capture_hotkey: default_quick_capture_hotkey(),
             quick_capture_enabled: default_quick_capture_enabled(),
             github_stale_days: default_github_stale_days(),
+            quiet_hours: None,
             theme: "system".into(),
             github_refresh_interval_minutes: 30,
             autostart: false,
@@ -264,5 +341,102 @@ mod tests {
         assert_eq!(restored.floating_note_glass_opacity, 0.46);
         assert!(restored.sanitize());
         assert_eq!(restored.schema_version, CONFIG_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn quiet_hours_parse_and_validate() {
+        assert_eq!(QuietHours::parse_time("22:30"), Some((22, 30)));
+        assert_eq!(QuietHours::parse_time("07:05"), Some((7, 5)));
+        assert_eq!(QuietHours::parse_time("24:00"), None);
+        assert_eq!(QuietHours::parse_time("7:60"), None);
+        assert_eq!(QuietHours::parse_time("abc"), None);
+        let quiet = QuietHours {
+            start: "22:00".into(),
+            end: "07:00".into(),
+        };
+        assert!(quiet.is_valid());
+        let bad = QuietHours {
+            start: "25:00".into(),
+            end: "07:00".into(),
+        };
+        assert!(!bad.is_valid());
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn quiet_hours_window_may_cross_midnight() {
+        let quiet = QuietHours {
+            start: "22:00".into(),
+            end: "07:00".into(),
+        };
+        let time = |h: u32, m: u32| chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        assert!(quiet.contains(time(23, 30)));
+        assert!(quiet.contains(time(6, 59)));
+        assert!(!quiet.contains(time(7, 0)));
+        assert!(!quiet.contains(time(12, 0)));
+        assert!(!quiet.contains(time(21, 59)));
+    }
+
+    #[test]
+    fn quiet_hours_within_same_day_and_equal_values() {
+        let quiet = QuietHours {
+            start: "09:00".into(),
+            end: "18:00".into(),
+        };
+        let time = |h: u32, m: u32| chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        assert!(quiet.contains(time(9, 0)));
+        assert!(quiet.contains(time(17, 59)));
+        assert!(!quiet.contains(time(18, 0)));
+        assert!(!quiet.contains(time(8, 59)));
+        // Equal start/end means the window is empty -> never quiet.
+        let empty = QuietHours {
+            start: "10:00".into(),
+            end: "10:00".into(),
+        };
+        assert!(!empty.contains(time(10, 0)));
+    }
+
+    #[test]
+    fn legacy_config_receives_no_quiet_hours() {
+        let json = r#"{
+            "schemaVersion": 2,
+            "dataDir": null,
+            "hotCorner": "top-right",
+            "hotkey": "Ctrl+Alt+M",
+            "theme": "dark",
+            "githubRefreshIntervalMinutes": 30,
+            "autostart": false,
+            "firstRun": true
+        }"#;
+        let restored: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.quiet_hours, None);
+        let json = serde_json::to_string(&restored).unwrap();
+        assert!(!json.contains("quietHours"));
+    }
+
+    #[test]
+    fn quiet_hours_roundtrip_and_invalid_values_are_sanitized() {
+        let quiet = Some(QuietHours {
+            start: "22:00".into(),
+            end: "07:00".into(),
+        });
+        let config = AppConfig {
+            quiet_hours: quiet.clone(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"quietHours\":{\"start\":\"22:00\",\"end\":\"07:00\"}"));
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.quiet_hours, quiet);
+
+        let mut invalid = AppConfig {
+            quiet_hours: Some(QuietHours {
+                start: "oops".into(),
+                end: "07:00".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(invalid.sanitize());
+        assert_eq!(invalid.quiet_hours, None);
     }
 }

@@ -153,7 +153,7 @@ flowchart LR
         MB["主面板 Todo / 便签 / GitHub「转为 Todo」"]
     end
     subgraph D["判断下一步"]
-        F["Focus 今日视图（收件箱优先 / 置顶便签 / 可行动信号）"]
+        F["Focus 今日视图（逾期 > 今天 > 近期 > 无日期 / 置顶便签 / 可行动信号）"]
     end
     subgraph A["执行"]
         ACT["完成 Todo / 悬浮便签 / 进入对应模块"]
@@ -168,7 +168,7 @@ flowchart LR
 | 阶段 | 入口 / 模块 | 说明 |
 | --- | --- | --- |
 | 捕获 | `quick_capture`（快速收集窗）、`todo` / `note` 服务、GitHub 视图「转为 Todo」 | 不打开主面板也能记录；GitHub 条目一键带来源进入收件箱 |
-| 判断下一步 | `focus` 服务 + FocusView | 只读聚合未完成 Todo（收件箱优先）、置顶 / 最近便签、带可行动信号的 GitHub 条目 |
+| 判断下一步 | `focus` 服务 + FocusView | 只读聚合未完成 Todo（按到期状态分组：逾期 / 今天 / 近期 / 无日期）、置顶 / 最近便签、带可行动信号的 GitHub 条目 |
 | 执行 | Todo 完成、悬浮便签、打开来源 | 最小动作就地完成或跳转 |
 | 回到来源 | `TodoSource`（type / repo / number / url） | Todo 携带来源，可一键返回 GitHub 原文，形成闭环 |
 
@@ -194,6 +194,7 @@ flowchart LR
 | `storage` | 数据目录解析、JSON 序列化 / 反序列化、原子写盘 | GitHub 数据获取 |
 | `backup` | 数据包导出 / 导入校验 / 备份轮转 / 恢复（临时目录校验 + 原子替换） | UI 展示 |
 | `github` | gh 子进程调用、响应解析、缓存读写、定时刷新 | UI 展示 |
+| `reminder` | 到期提醒扫描（`remindAt` 到期判定）与逾期计数（托盘徽标数据源）；安静时段判定 | 任何写操作；实际弹通知由 `app` 调度线程执行 |
 | `focus` | 跨领域只读投影：并行加载、局部失败隔离、排序 / 去重 / 截断 | 任何写操作 |
 | `models` | serde 数据模型（config / note / todo / github） | 任何 IO |
 | `events` | 跨窗口事件广播（数据变更、窗口状态） | 业务逻辑 |
@@ -218,10 +219,10 @@ flowchart LR
 
 ```text
 MayDolist/
-├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度
+├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度、提醒安静时段
 ├── backups/                 # 时间戳命名的本地备份 ZIP（保留最近 10 份）
 ├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
-├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；系统列表用 kind 标记
+├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；可带到期日/提醒/周期规则；系统列表用 kind 标记
 └── github/
     ├── watchlist.json       # 追踪仓库：filters / signalFilters / collapsed / ignored / pinned
     └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt / signalsComputedAt（可重建）
@@ -233,6 +234,7 @@ MayDolist/
 - 每个实体文件均含 `schemaVersion` 字段，用于未来格式迁移。
 - `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
 - Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）；旧数据无该字段时按无来源读取，序列化时缺省字段不落盘，向后兼容。
+- Todo 条目可携带可选的 `dueDate`（ISO 日期或 RFC3339 日期时间）、`remindAt`（RFC3339，仅与 `dueDate` 同时有意义）、`repeat`（`daily` / `weekly` / `biweekly` / `monthly`）与 `repeatUntil`（日期，停止重复生成）；旧数据无字段时按空值读取、落盘跳过 `None`，JSON 形状保持向后兼容。非法日期 / 非法组合在 service 层拒绝写入；读取时降级为无日期，不崩溃。
 - `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
 - 仓库快照的每个条目含可选信号字段（`assignees` / `reviewers` / `headSha` / `checksState` / `signals`），快照级 `signalsComputedAt` 记录信号计算时间；旧快照缺字段时按空值读取，刷新成功后自动补全（向后兼容，不需要迁移）。
 - 行动信号是稳定枚举（`needsAction` / `needsReview` / `ciFailed` / `stale` / `draft`），UI 只消费该枚举，不依赖 GitHub 原始字符串；`stale` 依据 `config.json` 的 `githubStaleDays`（默认 14 天，0 关闭）在读取快照时实时计算。
@@ -252,6 +254,7 @@ MayDolist/
 - `mainWindowGlassOpacity`：主面板玻璃背景层 alpha，范围 `0.4..=1.0`。
 - `floatingNoteGlassOpacity`：悬浮便签玻璃背景层 alpha，范围 `0.4..=1.0`。
 - `quickCaptureHotkey` / `quickCaptureEnabled`：快速收集窗的全局快捷键与启用开关，默认 `Ctrl+Alt+Space` / `true`；与主面板快捷键冲突或格式非法时在保存设置时报错，不写入。
+- `quietHours`（可选）：提醒安静时段，`start` / `end` 均为本地 `HH:MM`（24 小时制），支持跨午夜（如 `22:00`–`07:00`）；该时段内到期提醒不弹通知，仅保留托盘逾期徽标。旧配置无该字段时按 `null`（不启用）读取；非法值在加载时被清理回 `null`。
 
 相关规则：
 
@@ -304,6 +307,8 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 软删除数据保留在文件内，便于未来恢复；列表展示时过滤已删除项。
 - 条目可带来源引用（如 GitHub PR / Issue）：Todo 视图与 Focus 视图显示来源徽标（仓库 #编号），并提供「打开来源」操作；来源 URL 仅允许 http / https，由 Rust 层校验，打开统一走系统浏览器。
 - 来源字段必须通过 Rust command / service 传递并持久化，前端不直接写文件。
+- 条目可设置 / 清除到期日（`dueDate`）、提醒时间（`remindAt`）与周期规则（`repeat` / `repeatUntil`）。Todo 视图行内提供日期、日期时间与重复规则控件；所有写入经 `todo_update_item` 复用同一 command / service，前端不直接写文件。
+- 完成带 `repeat` 的任务时，service 在同一原子写中生成下一次实例（标题、来源、周期规则一致，`dueDate` 推进到下一个未来发生日），`repeatUntil` 到期后不再生成；重复生成逻辑集中在 Rust service 层并有单测，用户可以随时把周期规则改为「不重复」。
 
 ### 6.4 便签
 
@@ -329,12 +334,19 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - Focus 是主面板默认打开页，只做**只读投影**，不改变 Todo / 便签 / GitHub 任何文件格式，也不写回领域存储。
 - 并行加载三个领域（`FocusService::overview` 内线程并行），任一领域失败只产生该区块的局部错误，不阻塞其余区块。
 - 纳入规则：
-  - 待办：未完成且未软删除；「收件箱」（`kind=inbox`）优先，再按清单 / 条目 sort order，上限 50。
+  - 待办：未完成且未软删除；按到期状态分组展示——**已逾期**（`dueDate < 今天`，最早到期在前，红色高亮并置于区块顶部）→ **今天到期**（按到期时间升序）→ **近期 7 天**（`今天 < dueDate <= 今天+7`，按到期日期升序）→ **无日期**（收件箱优先、按原 sort order）；每个分组标题显示数量，跨组合计上限 50；非法日期降级进「无日期」组。分组逻辑在 `FocusService`（Rust）完成并输出分组元信息，前端只负责渲染。
   - 便签：置顶全部（按更新时间倒序）+ 最近更新的未置顶便签（默认 5 条），按 id 去重，上限 8。
   - GitHub：只读本地快照中 `state=open` 且携带**可行动信号**（需要我处理 / 需要 Review / CI 失败 / 长期未更新）的 Issue / PR（不发网络请求；仅 Draft 或无关的 open 条目不进入 Focus），手动钉住优先、按更新时间倒序，上限 30；未登录 / 离线 / 上次刷新失败时标记 `offlineCache` 并展示缓存。
 - 每个聚合项提供最小动作：完成 Todo、打开来源（GitHub 走系统浏览器）、进入对应模块（便签可携带目标 id 直接打开编辑，保留悬浮操作）。
 - Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
-- MVP 不引入日历与截止日期；「今日」仅基于未完成、置顶、最近更新等现有字段，截止日期另行演进。
+### 6.9 到期提醒、托盘徽标与周期任务
+
+- **提醒调度**：Rust 后台线程每 15 秒扫描全部未完成 Todo，命中 `remindAt <= now` 且 `dueDate` 存在的条目时发送 Windows 系统通知（标题「MayDolist 到期提醒」，正文为任务标题、来源清单与截止日期）。通知带「查看待办」按钮，点击打开主面板并聚焦对应条目（`focus-todo` 事件 → Focus 视图滚动 + 闪烁高亮）。
+- **静默降级**：通知被系统拦截、权限缺失或开发模式无 AUMID 时只记日志，不阻断主流程；托盘徽标始终保留为被动信号。安静时段内同样只保留徽标，不弹通知。
+- **托盘徽标**：逾期计数（`dueDate < 今天` 的未完成项）以红色数字徽标显示在托盘图标上，并同步更新 tooltip；数量为 0 时恢复默认图标并隐藏徽标。徽标由 Rust 端 16×16 RGBA 光栅化生成（内嵌 3×5 点阵数字），不依赖字体或网络。
+- **通知实现**：使用 `tauri-winrt-notification`（Windows Toast），toast 线程保持 COM 公寓存活直到被点击 / 关闭；开发模式下无注册 AUMID 时静默失败降级。
+- **重复生成**：完成带 `repeat` 的任务时，service 按规则与当前时间计算下一次 `dueDate`（daily / weekly / biweekly 按锚点日期步进，monthly 保留锚点日并做月末钳制，如 1-31 → 2-28 → 3-31），`repeatUntil` 到期后停止；新实例与已完成条目在同一原子写内落盘，避免重复生成。
+- **快速捕捉日期**：快速收集输入支持最小自然语言前缀：`明天` / `今天` / `后天`、`周X` / `星期X`（一～日 / 天）、`N天后`（1..=365）、`月底` / `月末`；解析结果写入 `dueDate`，解析失败或没有日期前缀时按普通 Todo 创建，不阻断捕获。
 
 ### 6.7 备份 / 导入 / 恢复
 
@@ -393,12 +405,16 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 热角、全局快捷键、托盘均可呼出 / 隐藏主面板。
 - 便签可拖出为独立悬浮小窗（置顶、可收起），数据与主面板一致。
 - GitHub 手动刷新与定时刷新成功，条目按仓库分组展示，点击在系统浏览器打开。
+- 设置到期日的 Todo 在 Focus 视图进入正确分组（已逾期置顶高亮、分组标题显示数量）；到点弹出提醒通知，点击通知打开主面板并聚焦条目。
+- 完成带周期规则的 Todo 自动生成下一次实例（`repeatUntil` 到期后停止）；快速收集输入 `明天 提交周报` 等前缀自动带到期日。
 
 ### 10.2 异常路径
 
 - 断网或 `gh api` 失败：展示缓存并提示「刷新失败」，不崩溃、不丢数据。
 - `gh auth status` 未登录 / token 失效：提示引导登录，缓存仍可查看。
 - 单个 JSON 损坏：隔离并重建该文件，其余数据不受影响。
+- 通知权限缺失 / 系统拦截 / 安静时段：不弹通知，托盘逾期徽标保持可用，主流程不受影响。
+- 非法日期 / 非法周期规则在写入时被拒绝，旧数据或损坏字段读取时降级为无日期，不崩溃。
 
 ### 10.3 恢复路径
 

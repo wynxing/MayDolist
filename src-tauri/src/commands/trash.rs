@@ -48,7 +48,7 @@ pub fn trash_restore(
             state
                 .services
                 .todo
-                .update_item(&id, None, None, Some(false))?;
+                .update_item(&id, None, None, Some(false), None)?;
         }
         "note" => {
             state.services.note.update(

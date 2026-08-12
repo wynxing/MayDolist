@@ -1,11 +1,34 @@
 use crate::{
     error::AppResult,
     events::emit_entity_changed,
-    models::{TodoItem, TodoList, TodoSource},
+    models::{RepeatRule, TodoItem, TodoList, TodoSource},
     AppState,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+
+/// Optional due / reminder / repeat fields sent from the frontend. The UI
+/// always sends the complete schedule when editing, so `null` means "cleared"
+/// and an omitted `schedule` key means "leave unchanged".
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TodoScheduleInput {
+    pub due_date: Option<String>,
+    pub remind_at: Option<String>,
+    pub repeat: Option<RepeatRule>,
+    pub repeat_until: Option<String>,
+}
+
+/// Update payload for `todo_update_item`. `schedule` is optional so callers
+/// that only rename / complete / delete never touch the due fields.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TodoPatchInput {
+    pub title: Option<String>,
+    pub completed: Option<bool>,
+    pub deleted: Option<bool>,
+    pub schedule: Option<TodoScheduleInput>,
+}
 #[tauri::command]
 pub fn todo_list(
     state: State<'_, AppState>,
@@ -52,8 +75,20 @@ pub fn todo_create_item(
     list_id: String,
     title: String,
     source: Option<TodoSource>,
+    schedule: Option<TodoScheduleInput>,
 ) -> AppResult<TodoItem> {
-    let v = state.services.todo.create_item(&list_id, title, source)?;
+    let schedule = schedule.unwrap_or_default();
+    let v = state.services.todo.create_item(
+        &list_id,
+        title,
+        source,
+        crate::services::todo::TodoSchedule {
+            due_date: schedule.due_date,
+            remind_at: schedule.remind_at,
+            repeat: schedule.repeat,
+            repeat_until: schedule.repeat_until,
+        },
+    )?;
     emit_entity_changed(&app, "todoItem", &v.id, "created")?;
     Ok(v)
 }
@@ -104,14 +139,22 @@ pub fn todo_update_item(
     state: State<'_, AppState>,
     app: AppHandle,
     id: String,
-    title: Option<String>,
-    completed: Option<bool>,
-    deleted: Option<bool>,
+    patch: TodoPatchInput,
 ) -> AppResult<TodoItem> {
-    let v = state
-        .services
-        .todo
-        .update_item(&id, title, completed, deleted)?;
+    let v = state.services.todo.update_item(
+        &id,
+        patch.title,
+        patch.completed,
+        patch.deleted,
+        patch
+            .schedule
+            .map(|schedule| crate::services::todo::TodoSchedule {
+                due_date: schedule.due_date,
+                remind_at: schedule.remind_at,
+                repeat: schedule.repeat,
+                repeat_until: schedule.repeat_until,
+            }),
+    )?;
     emit_entity_changed(&app, "todoItem", &id, "updated")?;
     Ok(v)
 }
@@ -143,6 +186,6 @@ pub fn todo_soft_delete(state: State<'_, AppState>, app: AppHandle, id: String) 
     state
         .services
         .todo
-        .update_item(&id, None, None, Some(true))?;
+        .update_item(&id, None, None, Some(true), None)?;
     emit_entity_changed(&app, "todoItem", &id, "deleted")
 }

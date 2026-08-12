@@ -91,6 +91,14 @@ export const useTodoStore = defineStore("todo", () => {
       const v = await api.updateItem(id, { completed: !completed });
       upsertItem(v);
     },
+    patchItem: async (
+      id: string,
+      patch: Parameters<typeof api.updateItem>[1]
+    ) => {
+      const v = await api.updateItem(id, patch);
+      upsertItem(v);
+      return v;
+    },
     renameItem: async (id: string, title: string) => {
       const v = await api.updateItem(id, { title });
       upsertItem(v);
