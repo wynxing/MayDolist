@@ -24,7 +24,7 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
     }
     let notes = app.state::<AppState>().services.note.list(false)?;
     for note in notes.into_iter().filter(|v| v.floating) {
-        show_note(&handle, &note)?;
+        show_note(&handle, &note, false)?;
     }
     spawn_hot_corner(handle);
     if let Some(main) = app.get_webview_window("main") {
@@ -62,6 +62,16 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
                 blur_window.hide().ok();
             }
             _ => {}
+        });
+    }
+    if let Some(quick_capture) = app.get_webview_window(QUICK_CAPTURE_WINDOW) {
+        apply_acrylic(&quick_capture);
+        let window = quick_capture.clone();
+        quick_capture.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                window.hide().ok();
+            }
         });
     }
     spawn_github_refresh(app.handle().clone());
@@ -109,7 +119,7 @@ pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
         app.global_shortcut()
             .on_shortcut(shortcut, move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    show_quick_capture(&handle).ok();
+                    toggle_quick_capture(&handle).ok();
                 }
             })
             .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
@@ -231,14 +241,26 @@ pub fn hide_quick_capture(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-pub fn show_note(app: &AppHandle, note: &Note) -> AppResult<()> {
+pub fn toggle_quick_capture(app: &AppHandle) -> AppResult<()> {
+    let window = app
+        .get_webview_window(QUICK_CAPTURE_WINDOW)
+        .ok_or_else(|| AppError::NotFound("quick capture window".into()))?;
+    if window.is_visible().map_err(internal)? {
+        window.hide().map_err(internal)
+    } else {
+        show_quick_capture(app)
+    }
+}
+
+pub fn show_note(app: &AppHandle, note: &Note, focus_body: bool) -> AppResult<()> {
     let label = format!("note-{}", note.id);
     if let Some(w) = app.get_webview_window(&label) {
         apply_acrylic(&w);
         w.show().map_err(internal)?;
         return w.set_focus().map_err(internal);
     }
-    let url = WebviewUrl::App(format!("index.html?note={}", note.id).into());
+    let focus = if focus_body { "&focus=body" } else { "" };
+    let url = WebviewUrl::App(format!("index.html?note={}{}", note.id, focus).into());
     let mut builder = WebviewWindowBuilder::new(app, &label, url)
         .title(&note.title)
         .inner_size(

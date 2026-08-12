@@ -4,7 +4,7 @@ use crate::{
     AppState,
 };
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 /// Result of a quick capture submission. `kind` is "todo" or "note"; for todos
 /// `target_list_id` carries the inbox list the item landed in.
@@ -18,18 +18,27 @@ pub struct QuickCaptureResult {
 }
 
 /// Split a quick capture input into its kind and trimmed content.
-/// `todo:` / `note:` prefixes are matched case-insensitively; anything else
-/// (including no prefix) creates a Todo.
+/// `/note` opens a new blank floating note. `todo:` remains an optional Todo
+/// prefix; all other text, including the former `note:` syntax, creates a Todo.
 pub fn parse_quick_capture(input: &str) -> Result<(&'static str, &str), AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(AppError::InvalidInput("input must not be empty".into()));
     }
     let lower = trimmed.to_ascii_lowercase();
+    if lower == "/note" {
+        return Ok(("note", ""));
+    }
+    if lower
+        .strip_prefix("/note")
+        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    {
+        return Err(AppError::InvalidInput(
+            "请输入单独的 /note 以打开空白悬浮便签".into(),
+        ));
+    }
     let (kind, rest) = if lower.starts_with("todo:") {
         ("todo", &trimmed["todo:".len()..])
-    } else if lower.starts_with("note:") {
-        ("note", &trimmed["note:".len()..])
     } else {
         ("todo", trimmed)
     };
@@ -41,7 +50,7 @@ pub fn parse_quick_capture(input: &str) -> Result<(&'static str, &str), AppError
 }
 
 #[tauri::command]
-pub fn quick_capture_submit(
+pub async fn quick_capture_submit(
     state: State<'_, AppState>,
     app: AppHandle,
     text: String,
@@ -63,11 +72,31 @@ pub fn quick_capture_submit(
             })
         }
         _ => {
-            let note = state
-                .services
-                .note
-                .create(content.to_string(), String::new())?;
-            emit_entity_changed(&app, "note", &note.id, "created")?;
+            let note = state.services.note.create("新便签".into(), String::new())?;
+            let note = match state.services.note.update(
+                &note.id,
+                crate::services::note::NotePatch {
+                    floating: Some(true),
+                    ..Default::default()
+                },
+            ) {
+                Ok(note) => note,
+                Err(err) => {
+                    state.services.note.permanent_delete(&note.id).ok();
+                    return Err(err);
+                }
+            };
+            if let Err(err) = crate::app::show_note(&app, &note, true) {
+                state.services.note.permanent_delete(&note.id).ok();
+                return Err(err);
+            }
+            if let Err(err) = emit_entity_changed(&app, "note", &note.id, "created") {
+                if let Some(window) = app.get_webview_window(&format!("note-{}", note.id)) {
+                    window.close().ok();
+                }
+                state.services.note.permanent_delete(&note.id).ok();
+                return Err(err);
+            }
             Ok(QuickCaptureResult {
                 kind: "note".into(),
                 id: note.id,
@@ -96,11 +125,8 @@ mod tests {
     }
 
     #[test]
-    fn parses_note_prefix() {
-        assert_eq!(
-            parse_quick_capture("note: 记录一个想法").unwrap(),
-            ("note", "记录一个想法")
-        );
+    fn parses_note_command() {
+        assert_eq!(parse_quick_capture("  /note  ").unwrap(), ("note", ""));
     }
 
     #[test]
@@ -112,11 +138,8 @@ mod tests {
     }
 
     #[test]
-    fn prefixes_are_case_insensitive_and_trimmed() {
-        assert_eq!(
-            parse_quick_capture("  NOTE:   大写前缀  ").unwrap(),
-            ("note", "大写前缀")
-        );
+    fn commands_and_prefixes_are_case_insensitive_and_trimmed() {
+        assert_eq!(parse_quick_capture("  /NOTE  ").unwrap(), ("note", ""));
         assert_eq!(
             parse_quick_capture("TODO: 大写前缀").unwrap(),
             ("todo", "大写前缀")
@@ -132,6 +155,26 @@ mod tests {
     #[test]
     fn rejects_prefix_without_content() {
         assert!(parse_quick_capture("todo:").is_err());
-        assert!(parse_quick_capture("note:   ").is_err());
+    }
+
+    #[test]
+    fn rejects_note_command_with_arguments() {
+        assert!(parse_quick_capture("/note 写点什么").is_err());
+    }
+
+    #[test]
+    fn text_that_only_starts_like_note_command_is_a_todo() {
+        assert_eq!(
+            parse_quick_capture("/notebook").unwrap(),
+            ("todo", "/notebook")
+        );
+    }
+
+    #[test]
+    fn former_note_prefix_is_plain_todo_text() {
+        assert_eq!(
+            parse_quick_capture("note: 记录一个想法").unwrap(),
+            ("todo", "note: 记录一个想法")
+        );
     }
 }

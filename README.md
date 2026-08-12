@@ -18,9 +18,10 @@ MayDolist 适合那些需要在编码、Review 和日常工作之间快速切换
 
 不需要先打开主面板：
 
-- `Ctrl+Alt+Space` 呼出快速收集窗口。
+- `Ctrl+Alt+Space` 呼出快速收集窗口，再按一次即可收起。
 - 普通文本保存为 Todo，并进入「收件箱」。
-- 以 `note:` 开头可直接创建便签。
+- 单独输入 `/note` 可创建并打开一个空白悬浮便签。
+- `Enter` 提交，`Esc` 或右上角关闭按钮收起窗口；未提交的输入会保留。
 - `Ctrl+Alt+M` 或屏幕热角呼出 / 隐藏主面板。
 
 ### Todo 与便签
@@ -160,7 +161,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 项目状态
 
-当前版本：`1.2.0`。核心 Todo、便签、Focus、GitHub 缓存追踪、快速收集、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
+当前版本：`1.2.1`。核心 Todo、便签、Focus、GitHub 缓存追踪、快速收集、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 

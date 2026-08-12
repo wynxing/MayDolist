@@ -1514,12 +1514,13 @@ textarea.input {
 
 /* Quick capture window (see views/QuickCapture.vue). */
 .quick-capture {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 18px 44px 10px 12px;
   background-image: var(--glass-tint);
   background-color: var(--bg);
   border: 1px solid var(--border);
@@ -1527,6 +1528,49 @@ textarea.input {
   box-shadow: var(--glass-shadow), var(--glass-highlight);
   backdrop-filter: var(--glass-blur) var(--glass-saturate);
   -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
+}
+.quick-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  cursor: grab;
+}
+.quick-drag::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 32px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--muted);
+  opacity: 0.45;
+  transform: translateX(-50%);
+}
+.quick-drag:active {
+  cursor: grabbing;
+}
+.quick-close {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.quick-close:hover {
+  background: var(--danger);
+  color: #fff;
 }
 .quick-form {
   display: flex;

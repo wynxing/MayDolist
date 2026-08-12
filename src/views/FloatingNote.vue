@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api/note";
 import { useSettingsStore } from "../stores/settings";
 
 const id = new URLSearchParams(location.search).get("note")!;
+const focusBody = new URLSearchParams(location.search).get("focus") === "body";
 const settings = useSettingsStore();
 const note = ref<any>(null);
+const contentInput = ref<HTMLTextAreaElement | null>(null);
 const status = ref("");
 const loadError = ref("");
 let timer: number | undefined;
@@ -20,6 +22,10 @@ async function load() {
   try {
     note.value = await api.get(id);
     hydrated = true;
+    if (focusBody) {
+      await nextTick();
+      contentInput.value?.focus();
+    }
   } catch (err) {
     loadError.value = String(err);
   }
@@ -116,7 +122,13 @@ async function toggle() {
       </button>
       <button aria-label="关闭悬浮便签" @click="dock">×</button>
     </header>
-    <textarea v-if="!note.collapsed" v-model="note.content" class="input" aria-label="便签内容"></textarea>
+    <textarea
+      v-if="!note.collapsed"
+      ref="contentInput"
+      v-model="note.content"
+      class="input"
+      aria-label="便签内容"
+    ></textarea>
     <small v-if="!note.collapsed" class="floating-status">{{ status }}</small>
   </div>
 </template>

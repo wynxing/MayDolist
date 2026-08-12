@@ -54,7 +54,17 @@ function onEsc() {
 </script>
 
 <template>
-  <div class="quick-capture">
+  <div class="quick-capture" @keydown.esc="onEsc">
+    <div class="quick-drag" data-tauri-drag-region aria-hidden="true"></div>
+    <button
+      class="quick-close"
+      type="button"
+      aria-label="关闭快速收集"
+      title="关闭（Esc）"
+      @click="onEsc"
+    >
+      ×
+    </button>
     <form class="quick-form glass-card" @submit.prevent="submit">
       <label class="sr-only" for="quick-input">快速收集</label>
       <input
@@ -62,18 +72,17 @@ function onEsc() {
         ref="input"
         v-model="text"
         class="quick-input"
-        placeholder="记录 Todo，或输入 note: 记录便签"
+        placeholder="输入待办，或输入 /note 打开悬浮便签"
         :disabled="busy"
         autocomplete="off"
         spellcheck="false"
         @keydown.enter="onEnter"
-        @keydown.esc="onEsc"
       />
       <button class="btn primary quick-submit" type="submit" :disabled="busy">
         {{ busy ? "保存中…" : "保存" }}
       </button>
     </form>
     <p v-if="error" class="quick-error" role="alert">{{ error }}</p>
-    <p class="quick-hint">Enter 保存到收件箱，Esc 关闭；前缀 note: 创建便签</p>
+    <p class="quick-hint">Enter 保存到收件箱；/note 打开空白悬浮便签；Esc 或快捷键关闭</p>
   </div>
 </template>

@@ -63,7 +63,7 @@ pub async fn note_show_floating(
     // On Windows, `WebviewWindowBuilder::build()` deadlocks when called from a
     // synchronous command; Tauri runs async commands on a separate thread
     // where window creation is safe (see wry#583).
-    crate::app::show_note(&app, &v)?;
+    crate::app::show_note(&app, &v, false)?;
     emit_entity_changed(&app, "note", &id, "floating")?;
     Ok(v)
 }
