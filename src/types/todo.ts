@@ -19,6 +19,6 @@ export interface TodoItem {
   /** RFC3339 / date; stops repeat generation. */
   repeatUntil?:string|null;
 }
-export interface TodoList { schemaVersion:number; id:string; title:string; sortOrder:number; deleted:boolean; createdAt:string; updatedAt:string; items:TodoItem[] }
+export interface TodoList { schemaVersion:number; id:string; title:string; kind?:string|null; sortOrder:number; deleted:boolean; createdAt:string; updatedAt:string; items:TodoItem[] }
 /** Result of converting a GitHub PR / issue into a Todo (Rust `TodoFromGithubResult`). */
 export interface TodoFromGithubResult { sourceType:string; id:string; title:string; repo:string; number:number; targetListId:string }
