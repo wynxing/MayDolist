@@ -691,7 +691,6 @@ mod tests {
         assert_eq!(result.github.len(), 1);
         assert_eq!(result.github[0].number, 7);
         assert_eq!(result.github[0].repo, "owner/repo");
-        assert!(!result.github_offline);
 
         // Todos that do not match stay out; commands still match keywords.
         let none = services.palette.search("完全不存在的词");
@@ -700,6 +699,49 @@ mod tests {
 
         let commands = services.palette.search("备份");
         assert_eq!(commands.commands[0].id, "backup-now");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn search_marks_offline_cache_from_snapshot_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "maydolist-palette-offline-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let services = Services::new(storage.clone());
+
+        let mut snap = snapshot("owner/repo");
+        snap.last_error = Some("network down".into());
+        snap.pull_requests = vec![pr(7, "登录页性能优化", "2026-08-01T00:00:00Z")];
+        storage
+            .write_json(
+                &storage.data_dir().join("github/cache/owner_repo.json"),
+                &snap,
+            )
+            .unwrap();
+        let watchlist = vec![RepoWatch {
+            full_name: "owner/repo".into(),
+            filters: vec!["mine".into()],
+            collapsed: false,
+            ignored: vec![],
+            pinned: vec![],
+            signal_filters: vec![],
+        }];
+        storage
+            .write_json(
+                &storage.data_dir().join("github/watchlist.json"),
+                &watchlist,
+            )
+            .unwrap();
+
+        let result = services.palette.search("登录");
+        assert_eq!(result.github.len(), 1, "cached items still shown offline");
+        assert!(
+            result.github_offline,
+            "a snapshot carrying lastError must mark the section offline"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
