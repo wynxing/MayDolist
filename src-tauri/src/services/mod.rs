@@ -3,6 +3,7 @@ pub mod backup;
 pub mod focus;
 pub mod github;
 pub mod note;
+pub mod reminder;
 pub mod todo;
 use crate::storage::Storage;
 pub struct Services {

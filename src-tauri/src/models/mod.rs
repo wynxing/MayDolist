@@ -7,8 +7,9 @@ pub mod todo;
 pub use config::AppConfig;
 pub use focus::{
     FocusGithub, FocusNote, FocusOverview, FocusSection, FocusSectionState, FocusTodo,
+    FocusTodoGroup, FocusTodoSection,
 };
 pub use github::{refresh_stale, ActionSignal};
 pub use github::{GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot, RepoWatch};
 pub use note::{Note, WindowBounds};
-pub use todo::{TodoItem, TodoList, TodoSource};
+pub use todo::{parse_due_date, RepeatRule, TodoItem, TodoList, TodoSource};

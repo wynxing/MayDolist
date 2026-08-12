@@ -60,6 +60,7 @@ fn seed(storage: &Storage, dir: &Path) -> AppResult<()> {
                 0,
                 DEMO_NOW,
                 None,
+                Some("2026-08-12"),
             ),
             todo(
                 "00000000-0000-4000-8000-000000000012",
@@ -72,6 +73,7 @@ fn seed(storage: &Storage, dir: &Path) -> AppResult<()> {
                     number: 214,
                     url: format!("https://github.com/{DEMO_REPO}/issues/214"),
                 }),
+                None,
             ),
         ],
     };
@@ -91,6 +93,7 @@ fn seed(storage: &Storage, dir: &Path) -> AppResult<()> {
                 0,
                 DEMO_YESTERDAY,
                 None,
+                Some("2026-08-10"),
             ),
             todo(
                 "00000000-0000-4000-8000-000000000022",
@@ -98,6 +101,7 @@ fn seed(storage: &Storage, dir: &Path) -> AppResult<()> {
                 1,
                 DEMO_LAST_WEEK,
                 None,
+                Some("2026-08-15"),
             ),
         ],
     };
@@ -115,6 +119,7 @@ fn seed(storage: &Storage, dir: &Path) -> AppResult<()> {
             "为下周安排一个无会议上午",
             0,
             DEMO_YESTERDAY,
+            None,
             None,
         )],
     };
@@ -247,6 +252,7 @@ fn todo(
     sort_order: i32,
     updated_at: &str,
     source: Option<TodoSource>,
+    due_date: Option<&str>,
 ) -> TodoItem {
     TodoItem {
         id: id.into(),
@@ -257,5 +263,9 @@ fn todo(
         created_at: DEMO_LAST_WEEK.into(),
         updated_at: updated_at.into(),
         source,
+        due_date: due_date.map(str::to_string),
+        remind_at: None,
+        repeat: None,
+        repeat_until: None,
     }
 }

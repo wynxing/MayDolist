@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use uuid::Uuid;
 
+use chrono::Local;
+
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
-use crate::models::{TodoItem, TodoList, TodoSource};
+use crate::models::todo::{next_repeat_due, parse_due_date, validate_due_date};
+use crate::models::{RepeatRule, TodoItem, TodoList, TodoSource};
 use crate::storage::Storage;
 use std::sync::Mutex;
 
@@ -12,6 +15,17 @@ pub const INBOX_KIND: &str = "inbox";
 /// Default title of the capture inbox. Existing lists with this exact title
 /// are adopted as the inbox so old data never gets a duplicate.
 pub const INBOX_TITLE: &str = "收件箱";
+
+/// Optional due / reminder / repeat fields of a Todo item. Used by both
+/// create and update so the service never grows unbounded argument lists.
+/// `None` fields mean "absent" (no due date / no reminder / no repeat).
+#[derive(Debug, Clone, Default)]
+pub struct TodoSchedule {
+    pub due_date: Option<String>,
+    pub remind_at: Option<String>,
+    pub repeat: Option<RepeatRule>,
+    pub repeat_until: Option<String>,
+}
 
 pub struct TodoService {
     storage: Arc<Storage>,
@@ -126,11 +140,18 @@ impl TodoService {
         list_id: &str,
         title: String,
         source: Option<TodoSource>,
+        schedule: TodoSchedule,
     ) -> AppResult<TodoItem> {
         validate_title(&title)?;
         if let Some(source) = &source {
             source.validate()?;
         }
+        validate_due_fields(
+            &schedule.due_date,
+            &schedule.remind_at,
+            &schedule.repeat,
+            &schedule.repeat_until,
+        )?;
         let mut list = self.get(list_id)?;
         let now = now_rfc3339();
         let item = TodoItem {
@@ -142,6 +163,10 @@ impl TodoService {
             created_at: now.clone(),
             updated_at: now,
             source,
+            due_date: schedule.due_date,
+            remind_at: schedule.remind_at,
+            repeat: schedule.repeat,
+            repeat_until: schedule.repeat_until,
         };
         list.items.push(item.clone());
         list.updated_at = now_rfc3339();
@@ -173,20 +198,27 @@ impl TodoService {
         source.validate()?;
         let list = self.ensure_inbox()?;
         let item_title = format!("{} #{} {}", repo.trim(), number, title.trim());
-        let item = self.create_item(&list.id, item_title, Some(source))?;
+        let item = self.create_item(&list.id, item_title, Some(source), TodoSchedule::default())?;
         Ok((list, item))
     }
 
+    /// Complete a Todo item. When the item carries a repeat rule, the next
+    /// instance is generated in the same list (same title, source and rule)
+    /// and persisted in the same atomic write, so a crash can never leave a
+    /// duplicate. `repeat_until` stops generation.
     pub fn update_item(
         &self,
         id: &str,
         title: Option<String>,
         completed: Option<bool>,
         deleted: Option<bool>,
+        schedule: Option<TodoSchedule>,
     ) -> AppResult<TodoItem> {
         let mut lists = self.list(true)?;
         for list in &mut lists {
+            let next_order = list.items.len() as i32;
             if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
+                let was_completed = item.completed;
                 if let Some(title) = title {
                     validate_title(&title)?;
                     item.title = title.trim().into();
@@ -197,8 +229,28 @@ impl TodoService {
                 if let Some(value) = deleted {
                     item.deleted = value;
                 }
+                if let Some(schedule) = schedule {
+                    item.due_date = schedule.due_date;
+                    item.remind_at = schedule.remind_at;
+                    item.repeat = schedule.repeat;
+                    item.repeat_until = schedule.repeat_until;
+                }
+                validate_due_fields(
+                    &item.due_date,
+                    &item.remind_at,
+                    &item.repeat,
+                    &item.repeat_until,
+                )?;
+                let next_instance = if completed == Some(true) && !was_completed {
+                    build_next_instance(item, next_order)
+                } else {
+                    None
+                };
                 item.updated_at = now_rfc3339();
                 let result = item.clone();
+                if let Some(next) = next_instance {
+                    list.items.push(next);
+                }
                 list.updated_at = now_rfc3339();
                 self.save(list)?;
                 return Ok(result);
@@ -289,6 +341,68 @@ fn validate_title(title: &str) -> AppResult<()> {
     }
 }
 
+/// Validate the optional due / reminder / repeat fields before persisting.
+/// `remindAt` only makes sense with `dueDate`; `repeatUntil` only makes sense
+/// with `repeat`. Invalid dates are rejected (never crash, never persisted).
+fn validate_due_fields(
+    due_date: &Option<String>,
+    remind_at: &Option<String>,
+    repeat: &Option<RepeatRule>,
+    repeat_until: &Option<String>,
+) -> AppResult<()> {
+    if let Some(value) = due_date {
+        validate_due_date(value)?;
+    }
+    if let Some(value) = remind_at {
+        if due_date.is_none() {
+            return Err(AppError::InvalidInput(
+                "remindAt requires dueDate to be set".into(),
+            ));
+        }
+        validate_due_date(value)?;
+    }
+    if let Some(value) = repeat_until {
+        if repeat.is_none() {
+            return Err(AppError::InvalidInput(
+                "repeatUntil requires repeat to be set".into(),
+            ));
+        }
+        validate_due_date(value)?;
+    }
+    Ok(())
+}
+
+/// Build the next repeat instance from a freshly-completed `item`. The anchor
+/// is the item's due date (falling back to today when unset); the next
+/// occurrence is always strictly after today. Returns `None` when the rule
+/// ended (`repeat_until`) so no duplicate is ever generated.
+fn build_next_instance(item: &TodoItem, sort_order: i32) -> Option<TodoItem> {
+    let rule = item.repeat?;
+    let anchor = item
+        .due_date
+        .as_deref()
+        .and_then(parse_due_date)
+        .unwrap_or_else(|| Local::now().date_naive());
+    let today = Local::now().date_naive();
+    let until = item.repeat_until.as_deref().and_then(parse_due_date);
+    let next_due = next_repeat_due(rule, anchor, today, until)?;
+    let now = now_rfc3339();
+    Some(TodoItem {
+        id: Uuid::new_v4().to_string(),
+        title: item.title.clone(),
+        completed: false,
+        deleted: false,
+        sort_order,
+        created_at: now.clone(),
+        updated_at: now,
+        source: item.source.clone(),
+        due_date: Some(next_due.format("%Y-%m-%d").to_string()),
+        remind_at: None,
+        repeat: Some(rule),
+        repeat_until: item.repeat_until.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +415,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         (dir, TodoService::new(storage))
+    }
+
+    fn schedule(
+        due: Option<&str>,
+        remind: Option<&str>,
+        repeat: Option<RepeatRule>,
+        until: Option<&str>,
+    ) -> TodoSchedule {
+        TodoSchedule {
+            due_date: due.map(str::to_string),
+            remind_at: remind.map(str::to_string),
+            repeat,
+            repeat_until: until.map(str::to_string),
+        }
     }
 
     #[test]
@@ -343,7 +471,12 @@ mod tests {
         let (dir, service) = temp_service("inbox-items");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
-            .create_item(&inbox.id, " 修复登录 ".into(), None)
+            .create_item(
+                &inbox.id,
+                " 修复登录 ".into(),
+                None,
+                TodoSchedule::default(),
+            )
             .unwrap();
         assert_eq!(item.title, "修复登录");
         let stored = service.get(&inbox.id).unwrap();
@@ -460,6 +593,7 @@ mod tests {
                 number: 1,
                 url: "file:///etc/passwd".into(),
             }),
+            TodoSchedule::default(),
         );
         assert!(bad.is_err());
         let stored = service.get(&inbox.id).unwrap();
@@ -481,6 +615,7 @@ mod tests {
                     number: 42,
                     url: "https://github.com/owner/repo/pull/42".into(),
                 }),
+                TodoSchedule::default(),
             )
             .unwrap();
         let raw =
@@ -544,6 +679,214 @@ mod tests {
         let raw =
             std::fs::read_to_string(dir.join("todos").join(format!("{}.json", list.id))).unwrap();
         assert!(raw.contains("\"kind\": \"inbox\""));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn create_item_persists_due_reminder_and_repeat_fields() {
+        let (dir, service) = temp_service("due-fields");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "到期任务".into(),
+                None,
+                schedule(
+                    Some("2026-08-20"),
+                    Some("2026-08-20T09:00:00+08:00"),
+                    Some(RepeatRule::Weekly),
+                    Some("2026-12-31"),
+                ),
+            )
+            .unwrap();
+        assert_eq!(item.due_date.as_deref(), Some("2026-08-20"));
+        assert_eq!(item.repeat, Some(RepeatRule::Weekly));
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(stored.items[0].due_date, item.due_date);
+        assert_eq!(stored.items[0].remind_at, item.remind_at);
+        assert_eq!(stored.items[0].repeat_until, item.repeat_until);
+        let raw =
+            std::fs::read_to_string(dir.join("todos").join(format!("{}.json", inbox.id))).unwrap();
+        assert!(raw.contains("\"dueDate\": \"2026-08-20\""));
+        assert!(raw.contains("\"repeat\": \"weekly\""));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn create_item_rejects_invalid_due_fields_without_partial_record() {
+        let (dir, service) = temp_service("due-reject");
+        let inbox = service.ensure_inbox().unwrap();
+        assert!(service
+            .create_item(
+                &inbox.id,
+                "坏日期".into(),
+                None,
+                schedule(Some("2026-02-30"), None, None, None),
+            )
+            .is_err());
+        assert!(service
+            .create_item(
+                &inbox.id,
+                "无到期日的提醒".into(),
+                None,
+                schedule(None, Some("2026-08-20T09:00:00Z"), None, None),
+            )
+            .is_err());
+        assert!(service
+            .create_item(
+                &inbox.id,
+                "无周期的截止".into(),
+                None,
+                schedule(None, None, None, Some("2026-12-31")),
+            )
+            .is_err());
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(stored.items.len(), 0, "no half-written item");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn completing_repeat_item_spawns_exactly_one_next_instance() {
+        let (dir, service) = temp_service("repeat-spawn");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "每周清理 stale PR".into(),
+                None,
+                schedule(Some("2026-01-05"), None, Some(RepeatRule::Weekly), None),
+            )
+            .unwrap();
+        let done = service
+            .update_item(&item.id, None, Some(true), None, None)
+            .unwrap();
+        assert!(done.completed);
+        let stored = service.get(&inbox.id).unwrap();
+        let pending: Vec<_> = stored.items.iter().filter(|v| !v.completed).collect();
+        assert_eq!(pending.len(), 1, "exactly one next instance");
+        let next = &pending[0];
+        assert_eq!(next.title, "每周清理 stale PR");
+        assert_eq!(next.repeat, Some(RepeatRule::Weekly));
+        let today = chrono::Local::now().date_naive();
+        let next_due = crate::models::parse_due_date(next.due_date.as_deref().unwrap()).unwrap();
+        assert!(next_due > today, "next due must be after today");
+        assert!(
+            (next_due - today).num_days() <= 7,
+            "weekly next occurrence within 7 days"
+        );
+        // Completing the already-completed item must not spawn a duplicate.
+        service
+            .update_item(&item.id, None, Some(true), None, None)
+            .unwrap();
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(stored.items.iter().filter(|v| !v.completed).count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn repeat_until_stops_generation_on_completion() {
+        let (dir, service) = temp_service("repeat-until");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "临时每日任务".into(),
+                None,
+                schedule(
+                    Some("2026-01-01"),
+                    None,
+                    Some(RepeatRule::Daily),
+                    Some("2020-12-31"),
+                ),
+            )
+            .unwrap();
+        service
+            .update_item(&item.id, None, Some(true), None, None)
+            .unwrap();
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(
+            stored.items.len(),
+            1,
+            "repeatUntil expired -> no next instance"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn completing_plain_item_creates_no_next_instance() {
+        let (dir, service) = temp_service("plain-complete");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "一次性任务".into(),
+                None,
+                TodoSchedule::default(),
+            )
+            .unwrap();
+        service
+            .update_item(&item.id, None, Some(true), None, None)
+            .unwrap();
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(stored.items.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn repeat_next_instance_keeps_source_link() {
+        let (dir, service) = temp_service("repeat-source");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "跟进 issue".into(),
+                Some(TodoSource {
+                    kind: "github-issue".into(),
+                    repo: "owner/repo".into(),
+                    number: 7,
+                    url: "https://github.com/owner/repo/issues/7".into(),
+                }),
+                schedule(Some("2026-01-01"), None, Some(RepeatRule::Monthly), None),
+            )
+            .unwrap();
+        service
+            .update_item(&item.id, None, Some(true), None, None)
+            .unwrap();
+        let stored = service.get(&inbox.id).unwrap();
+        let next = stored.items.iter().find(|v| !v.completed).unwrap();
+        let source = next.source.as_ref().expect("source must be kept");
+        assert_eq!(source.number, 7);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_item_can_clear_and_validate_due_fields() {
+        let (dir, service) = temp_service("update-due");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "可编辑任务".into(),
+                None,
+                schedule(Some("2026-08-20"), Some("2026-08-20T09:00:00Z"), None, None),
+            )
+            .unwrap();
+        // Invalid datetime must be rejected and leave the item untouched.
+        assert!(service
+            .update_item(
+                &item.id,
+                None,
+                None,
+                None,
+                Some(schedule(Some("oops"), None, None, None)),
+            )
+            .is_err());
+        // Clearing dueDate together with remindAt succeeds.
+        let updated = service
+            .update_item(&item.id, None, None, None, Some(TodoSchedule::default()))
+            .unwrap();
+        assert_eq!(updated.due_date, None);
+        assert_eq!(updated.remind_at, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

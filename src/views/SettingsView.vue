@@ -38,6 +38,8 @@ const trashCount = computed(
     (trash.value?.notes?.length ?? 0)
 );
 
+const quietEnabled = computed(() => !!settings.config?.quietHours);
+
 onMounted(async () => {
   await settings.init();
   await updater.init();
@@ -133,8 +135,17 @@ function formatCheckTime(value: string | null) {
 
 async function save() {
   if (!settings.config) return;
-  await settings.update(settings.config);
-  message.value = "设置已保存";
+  try {
+    await settings.update(settings.config);
+    message.value = "设置已保存";
+  } catch (err) {
+    message.value = `保存失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+function toggleQuietHours() {
+  if (!settings.config) return;
+  settings.config.quietHours = quietEnabled.value ? null : { start: "22:00", end: "07:00" };
 }
 
 function previewOpacity(
@@ -228,6 +239,26 @@ async function clearTrash() {
             <input v-model="settings.config.quickCaptureEnabled" type="checkbox" />
             <span>启用快速收集窗口（默认 Ctrl+Alt+Space）</span>
           </label>
+        </div>
+
+        <div class="settings-row">
+          <span>
+            提醒安静时段
+            <small>该时段内到期提醒不弹通知，仅托盘徽标提示</small>
+          </span>
+          <label class="settings-switch">
+            <input :checked="quietEnabled" type="checkbox" @change="toggleQuietHours" />
+            <span>启用安静时段</span>
+          </label>
+        </div>
+
+        <div v-if="quietEnabled && settings.config.quietHours" class="settings-row">
+          <span>安静时段</span>
+          <span class="settings-control quiet-hours-controls">
+            <input v-model="settings.config.quietHours.start" type="time" class="input" aria-label="安静时段开始" />
+            <span class="quiet-hours-sep">至</span>
+            <input v-model="settings.config.quietHours.end" type="time" class="input" aria-label="安静时段结束" />
+          </span>
         </div>
 
         <label class="settings-row">

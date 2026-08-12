@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import EmptyState from "../components/EmptyState.vue";
 import { open } from "../api/github";
+import type { TodoScheduleInput } from "../api/todo";
 import { useTodoStore } from "../stores/todo";
-import type { TodoItem, TodoList, TodoSource } from "../types/todo";
+import type { RepeatRule, TodoItem, TodoList, TodoSource } from "../types/todo";
 
 const store = useTodoStore();
 const actionError = ref("");
@@ -100,6 +101,64 @@ function sourceLabel(source: TodoSource) {
 
 function isHttpUrl(url: string) {
   return /^https?:\/\//i.test(url);
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function localDateValue(value: string | null | undefined) {
+  if (!value) return "";
+  const d = new Date(value.length === 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function localDateTimeValue(value: string | null | undefined) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
+    d.getHours()
+  )}:${pad2(d.getMinutes())}`;
+}
+
+function scheduleOf(item: TodoItem): TodoScheduleInput {
+  return {
+    dueDate: item.dueDate ?? null,
+    remindAt: item.remindAt ?? null,
+    repeat: item.repeat ?? null,
+    repeatUntil: item.repeatUntil ?? null,
+  };
+}
+
+async function patchSchedule(item: TodoItem, schedule: TodoScheduleInput) {
+  actionError.value = "";
+  try {
+    await store.patchItem(item.id, { schedule });
+  } catch (err) {
+    actionError.value = String(err);
+  }
+}
+
+async function setDueDate(item: TodoItem, value: string) {
+  const schedule = scheduleOf(item);
+  schedule.dueDate = value || null;
+  if (!schedule.dueDate) schedule.remindAt = null;
+  await patchSchedule(item, schedule);
+}
+
+async function setRemindAt(item: TodoItem, value: string) {
+  const schedule = scheduleOf(item);
+  schedule.remindAt = value ? new Date(value).toISOString() : null;
+  await patchSchedule(item, schedule);
+}
+
+async function setRepeat(item: TodoItem, value: string) {
+  const schedule = scheduleOf(item);
+  schedule.repeat = (value || null) as RepeatRule | null;
+  if (!schedule.repeat) schedule.repeatUntil = null;
+  await patchSchedule(item, schedule);
 }
 
 async function openSource(item: TodoItem) {
@@ -337,6 +396,35 @@ function onItemDragEnd() {
             <span v-if="item.source" class="todo-source" :title="item.source.url">
               {{ sourceLabel(item.source) }}
             </span>
+            <div class="todo-item-schedule">
+              <input
+                type="date"
+                :value="localDateValue(item.dueDate)"
+                :aria-label="`${item.title} 到期日`"
+                title="到期日"
+                @change="setDueDate(item, ($event.target as HTMLInputElement).value)"
+              />
+              <input
+                type="datetime-local"
+                :value="localDateTimeValue(item.remindAt)"
+                :aria-label="`${item.title} 提醒时间`"
+                title="提醒时间（需设置到期日）"
+                :disabled="!item.dueDate"
+                @change="setRemindAt(item, ($event.target as HTMLInputElement).value)"
+              />
+              <select
+                :value="item.repeat ?? ''"
+                :aria-label="`${item.title} 重复规则`"
+                title="重复规则"
+                @change="setRepeat(item, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">不重复</option>
+                <option value="daily">每天</option>
+                <option value="weekly">每周</option>
+                <option value="biweekly">每两周</option>
+                <option value="monthly">每月</option>
+              </select>
+            </div>
             <div class="todo-item-actions">
               <button class="text-action" type="button" @click="startItemEdit(item)">编辑</button>
               <button

@@ -3,9 +3,11 @@ use crate::{
     models::{AppConfig, Note, WindowBounds},
     AppState,
 };
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::{Effect, EffectsBuilder};
@@ -27,6 +29,7 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
         show_note(&handle, &note, false)?;
     }
     spawn_hot_corner(handle);
+    spawn_due_tracking(app.handle().clone());
     if let Some(main) = app.get_webview_window("main") {
         apply_acrylic(&main);
         let blur_window = main.clone();
@@ -152,7 +155,7 @@ fn build_tray(app: &AppHandle) -> AppResult<()> {
     )
     .map_err(internal)?;
     let handle = app.clone();
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id("main")
         .menu(&menu)
         .tooltip("MayDolist")
         .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -392,6 +395,226 @@ fn spawn_github_refresh(app: AppHandle) {
     });
 }
 
+/// Due-date background loop: every tick it (1) fires due reminders as Windows
+/// toasts (silently degrading to the tray badge when the system blocks
+/// notifications), and (2) refreshes the tray badge with the overdue count
+/// (hidden when 0). All writes stay on the Rust side; the frontend only
+/// receives the `focus-todo` event when a toast is clicked.
+fn spawn_due_tracking(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut fired: HashSet<(String, String)> = HashSet::new();
+        let mut last_overdue: Option<usize> = None;
+        // A stale app run may have pending reminders; do the first scan
+        // immediately instead of waiting one full tick.
+        tick_due_tracking(&app, &mut fired, &mut last_overdue);
+        loop {
+            std::thread::sleep(Duration::from_secs(15));
+            tick_due_tracking(&app, &mut fired, &mut last_overdue);
+        }
+    });
+}
+
+fn tick_due_tracking(
+    app: &AppHandle,
+    fired: &mut HashSet<(String, String)>,
+    last_overdue: &mut Option<usize>,
+) {
+    let state = app.state::<AppState>();
+    let lists = match state.services.todo.list(false) {
+        Ok(lists) => lists,
+        Err(err) => {
+            state
+                .log
+                .log("error", &format!("due tracking failed: {err}"));
+            return;
+        }
+    };
+    let now = chrono::Utc::now();
+    let quiet_hours = state
+        .storage
+        .load_config()
+        .ok()
+        .and_then(|config| config.quiet_hours);
+    let local_now = chrono::Local::now();
+    for due in crate::services::reminder::due_reminders(&lists, &now) {
+        let key = (due.id.clone(), due.remind_at.clone());
+        if fired.contains(&key) {
+            continue;
+        }
+        let quiet = quiet_hours
+            .as_ref()
+            .is_some_and(|window| window.contains(local_now.time()));
+        if !quiet {
+            show_reminder(app, &due);
+            state
+                .log
+                .log("info", &format!("due reminder fired for {}", due.id));
+        }
+        // Mark as fired either way: quiet-hours reminders stay silent (badge
+        // only) and never fire late.
+        fired.insert(key);
+    }
+    if fired.len() > 4096 {
+        let cutoff = now - chrono::Duration::days(30);
+        fired.retain(|(_, remind_at)| {
+            chrono::DateTime::parse_from_rfc3339(remind_at)
+                .map(|ts| ts.with_timezone(&chrono::Utc) >= cutoff)
+                .unwrap_or(true)
+        });
+    }
+
+    let overdue = crate::services::reminder::overdue_count(&lists, local_now.date_naive());
+    if *last_overdue != Some(overdue) {
+        update_tray_badge(app, overdue);
+        *last_overdue = Some(overdue);
+    }
+}
+
+fn update_tray_badge(app: &AppHandle, overdue: usize) {
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
+    if overdue == 0 {
+        tray.set_icon(app.default_window_icon().cloned()).ok();
+        tray.set_tooltip(Some("MayDolist")).ok();
+    } else {
+        tray.set_icon(Some(draw_overdue_badge(overdue))).ok();
+        tray.set_tooltip(Some(&format!("MayDolist — {overdue} 项逾期")))
+            .ok();
+    }
+}
+
+/// Render a red badge icon with the overdue count (up to two digits) on a
+/// transparent 16x16 RGBA image. Pure rasterizer: no fonts or OS calls, so it
+/// works on any platform and is unit-testable.
+fn draw_overdue_badge(count: usize) -> Image<'static> {
+    const SIZE: usize = 16;
+    const DIGIT_W: usize = 3;
+    const DIGIT_H: usize = 5;
+    const SCALE: usize = 2;
+    const DIGITS: [[u8; DIGIT_W * DIGIT_H]; 10] = [
+        [0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0], // 0
+        [0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1], // 1
+        [1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1], // 2
+        [1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1], // 3
+        [1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1], // 4
+        [1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1], // 5
+        [0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1], // 6
+        [1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0], // 7
+        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0], // 8
+        [1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0], // 9
+    ];
+    let mut rgba = vec![0u8; SIZE * SIZE * 4];
+    let text = count.min(99).to_string();
+    let digits_w = text.len() * DIGIT_W * SCALE;
+    let digits_h = DIGIT_H * SCALE;
+    let start_x = (SIZE - digits_w) / 2;
+    let start_y = (SIZE - digits_h) / 2;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 + 0.5 - 7.5;
+            let dy = y as f32 + 0.5 - 7.5;
+            let mut pixel = [0u8; 4];
+            if dx * dx + dy * dy <= 8.0 * 8.0 {
+                pixel = [232, 68, 68, 255];
+            }
+            for (index, ch) in text.chars().enumerate() {
+                let glyph = &DIGITS[ch.to_digit(10).unwrap_or(0) as usize];
+                let gx = (x as i32 - (start_x + index * DIGIT_W * SCALE) as i32) / SCALE as i32;
+                let gy = (y as i32 - start_y as i32) / SCALE as i32;
+                if gx >= 0
+                    && gy >= 0
+                    && (gx as usize) < DIGIT_W
+                    && (gy as usize) < DIGIT_H
+                    && glyph[gy as usize * DIGIT_W + gx as usize] == 1
+                {
+                    pixel = [255, 255, 255, 255];
+                }
+            }
+            if pixel[3] != 0 {
+                let offset = (y * SIZE + x) * 4;
+                rgba[offset..offset + 4].copy_from_slice(&pixel);
+            }
+        }
+    }
+    Image::new_owned(rgba, SIZE as u32, SIZE as u32)
+}
+
+/// Show a Windows toast for a due reminder. Errors (missing AUMID in dev,
+/// notifications disabled, system interception) are logged and swallowed —
+/// the tray badge remains the passive signal.
+#[cfg(windows)]
+fn show_reminder(app: &AppHandle, due: &crate::services::reminder::DueReminder) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tauri_winrt_notification::{Sound, Toast};
+
+    let handle = app.clone();
+    let click_handle = app.clone();
+    let app_id = app.config().identifier.clone();
+    let todo_id = due.id.clone();
+    let title = due.title.clone();
+    let list_title = due.list_title.clone();
+    let due_label = due.due_date.clone().unwrap_or_default();
+    std::thread::spawn(move || {
+        // Keep the thread (and its COM apartment) alive until the toast is
+        // activated or dismissed, otherwise the click callback never fires.
+        let done = Arc::new(AtomicBool::new(false));
+        let done_click = done.clone();
+        let done_dismiss = done.clone();
+        init_com_mta();
+        let result = Toast::new(&app_id)
+            .title("MayDolist 到期提醒")
+            .text1(&title)
+            .text2(&format!("来自「{list_title}」 · 截止 {due_label}"))
+            .sound(Some(Sound::Reminder))
+            .add_button("查看待办", &todo_id)
+            .on_activated(move |action| {
+                show_main(&click_handle).ok();
+                if let Some(id) = action {
+                    click_handle.emit("focus-todo", id).ok();
+                }
+                done_click.store(true, Ordering::Relaxed);
+                Ok(())
+            })
+            .on_dismissed(move |_| {
+                done_dismiss.store(true, Ordering::Relaxed);
+                Ok(())
+            })
+            .show();
+        if let Err(err) = result {
+            handle
+                .state::<AppState>()
+                .log
+                .log("info", &format!("toast suppressed: {err}"));
+            return;
+        }
+        // Bounded wait (max 30s) so a dismissed/ignored toast never leaks a
+        // thread forever.
+        let mut waited = 0u32;
+        while !done.load(Ordering::Relaxed) && waited < 300 {
+            std::thread::sleep(Duration::from_millis(100));
+            waited += 1;
+        }
+    });
+}
+
+#[cfg(windows)]
+fn init_com_mta() {
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    }
+}
+
+#[cfg(not(windows))]
+fn show_reminder(app: &AppHandle, due: &crate::services::reminder::DueReminder) {
+    app.state::<AppState>().log.log(
+        "info",
+        &format!("reminder due (toast unavailable): {}", due.id),
+    );
+}
+
 #[tauri::command]
 pub fn app_show_main(app: AppHandle) -> AppResult<()> {
     show_main(&app)
@@ -488,4 +711,43 @@ fn hot_corner_hit(_: &str) -> bool {
 }
 fn internal<E: std::fmt::Display>(e: E) -> AppError {
     AppError::Internal(e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn badge_has_expected_size_and_opaque_pixels() {
+        let badge = draw_overdue_badge(3);
+        assert_eq!(badge.width(), 16);
+        assert_eq!(badge.height(), 16);
+        let rgba = badge.rgba();
+        assert_eq!(rgba.len(), 16 * 16 * 4);
+        assert!(
+            rgba.chunks_exact(4).any(|p| p[3] != 0),
+            "badge must contain visible pixels"
+        );
+    }
+
+    #[test]
+    fn badge_digits_differ_and_count_is_capped() {
+        let one = draw_overdue_badge(1).rgba().to_vec();
+        let twelve = draw_overdue_badge(12).rgba().to_vec();
+        assert_ne!(one, twelve, "different counts must render differently");
+        let capped = draw_overdue_badge(9999);
+        // 99 renders the same glyphs as 9999 (capped at two digits).
+        assert_eq!(
+            capped.rgba().to_vec(),
+            draw_overdue_badge(99).rgba().to_vec()
+        );
+    }
+
+    #[test]
+    fn badge_zero_still_renders_red_circle() {
+        // `draw_overdue_badge(0)` shows "0" — used only while a count exists;
+        // the tray is reset to the default icon when the count reaches 0.
+        let badge = draw_overdue_badge(0);
+        assert!(badge.rgba().chunks_exact(4).any(|p| p[0] == 232));
+    }
 }

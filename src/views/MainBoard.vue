@@ -2,9 +2,11 @@
 import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { call } from "../api";
+import { useFocusStore } from "../stores/focus";
 import { useSettingsStore } from "../stores/settings";
 
 const settings = useSettingsStore();
+const focus = useFocusStore();
 const buildId = __BUILD_ID__;
 const active = ref("focus");
 const tabs = [
@@ -42,6 +44,11 @@ onMounted(async () => {
     if (e.payload === "settings") active.value = "settings";
     if (e.payload === "new-note") active.value = "note";
     if (e.payload === "refresh-github") active.value = "github";
+  });
+  await listen<string>("focus-todo", (e) => {
+    // Notification click: open the Focus tab and highlight the item.
+    active.value = "focus";
+    focus.requestFocus(e.payload);
   });
 });
 </script>

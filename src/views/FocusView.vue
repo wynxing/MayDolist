@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { openNoteInModule } from "../navigation";
 import { useFocusStore } from "../stores/focus";
 import { useGithubStore } from "../stores/github";
 import { useNoteStore } from "../stores/note";
 import { useTodoStore } from "../stores/todo";
 import { signalBadges } from "../signals";
-import type { FocusGithub, FocusNote, FocusSection, FocusTodo } from "../types/focus";
-import type { TodoSource } from "../types/todo";
+import type { FocusGithub, FocusNote, FocusSection, FocusTodo, FocusTodoSection } from "../types/focus";
+import type { RepeatRule, TodoSource } from "../types/todo";
 
 const emit = defineEmits<{ navigate: [tab: string] }>();
 
@@ -28,8 +28,12 @@ const filterLabels = [
 
 onMounted(() => void focus.init());
 
-const todoSection = computed<FocusSection<FocusTodo> | null>(
+const todoSection = computed<FocusTodoSection | null>(
   () => focus.overview?.todo ?? null
+);
+const shownTodoCount = computed(
+  () =>
+    todoSection.value?.groups.reduce((sum, group) => sum + group.items.length, 0) ?? 0
 );
 const noteSection = computed<FocusSection<FocusNote> | null>(
   () => focus.overview?.note ?? null
@@ -53,6 +57,23 @@ const allEmpty = computed(() => {
     githubSection.value && githubSection.value.total === 0 && !githubSection.value.error;
   return !!todoEmpty && !!noteEmpty && !!githubEmpty;
 });
+
+// A notification click asks to highlight one Todo: scroll it into view and
+// flash it briefly, then clear the request so a later refresh does not
+// re-highlight it.
+watch(
+  () => focus.focusTodoId,
+  async (id) => {
+    if (!id) return;
+    await nextTick();
+    await nextTick();
+    const element = document.querySelector<HTMLElement>(`[data-todo-id="${id}"]`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    element?.classList.add("focus-flash");
+    window.setTimeout(() => element?.classList.remove("focus-flash"), 4000);
+    focus.focusTodoId = null;
+  }
+);
 
 function go(tab: string) {
   emit("navigate", tab);
@@ -130,6 +151,25 @@ function formatTime(iso: string) {
     minute: "2-digit",
   });
 }
+
+function formatDue(iso: string | null | undefined) {
+  if (!iso) return "";
+  const date = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
+function repeatLabel(repeat: RepeatRule | null | undefined) {
+  if (!repeat) return "";
+  const labels: Record<RepeatRule, string> = {
+    daily: "每天重复",
+    weekly: "每周重复",
+    biweekly: "每两周重复",
+    monthly: "每月重复",
+  };
+  return labels[repeat];
+}
+
 </script>
 
 <template>
@@ -174,37 +214,62 @@ function formatTime(iso: string) {
             待办加载失败：{{ todoSection.error }}
           </p>
 
-          <ul v-if="todoSection?.items.length" class="focus-list">
-            <li v-for="item in todoSection.items" :key="item.id" class="focus-item">
-              <input
-                type="checkbox"
-                :aria-label="`完成待办：${item.title}`"
-                title="完成"
-                @change="completeTodo(item)"
-              />
-              <div class="focus-item-body">
-                <span class="focus-item-title" :title="item.title">{{ item.title }}</span>
-                <small class="focus-item-meta" :class="{ inbox: item.inbox }">
-                  {{ item.inbox ? "收件箱" : item.listTitle }}
-                </small>
-                <small v-if="item.source" class="focus-item-source" :title="item.source.url">
-                  {{ todoSourceLabel(item.source) }}
-                </small>
-              </div>
-              <button
-                v-if="item.source && isHttpUrl(item.source.url)"
-                class="btn ghost compact"
-                type="button"
-                :title="`在浏览器打开来源 ${item.source.url}`"
-                @click="openTodoSource(item)"
-              >
-                打开来源
-              </button>
-            </li>
-          </ul>
+          <div v-if="todoSection?.groups.length" class="focus-todo-groups">
+            <section
+              v-for="group in todoSection.groups"
+              :key="group.key"
+              class="focus-todo-group"
+              :class="{ overdue: group.key === 'overdue' }"
+            >
+              <header class="focus-todo-group-header">
+                <h3>{{ group.title }}</h3>
+                <span>{{ group.count }} 项</span>
+              </header>
+              <ul class="focus-list">
+                <li
+                  v-for="item in group.items"
+                  :key="item.id"
+                  class="focus-item"
+                  :class="{ 'focus-item-overdue': group.key === 'overdue' }"
+                  :data-todo-id="item.id"
+                >
+                  <input
+                    type="checkbox"
+                    :aria-label="`完成待办：${item.title}`"
+                    title="完成"
+                    @change="completeTodo(item)"
+                  />
+                  <div class="focus-item-body">
+                    <span class="focus-item-title" :title="item.title">{{ item.title }}</span>
+                    <small class="focus-item-meta" :class="{ inbox: item.inbox }">
+                      {{ item.inbox ? "收件箱" : item.listTitle }}
+                    </small>
+                    <small v-if="item.source" class="focus-item-source" :title="item.source.url">
+                      {{ todoSourceLabel(item.source) }}
+                    </small>
+                    <small v-if="item.dueDate" class="focus-item-due">
+                      截止 {{ formatDue(item.dueDate) }}
+                    </small>
+                    <small v-if="item.repeat" class="focus-item-repeat">
+                      {{ repeatLabel(item.repeat) }}
+                    </small>
+                  </div>
+                  <button
+                    v-if="item.source && isHttpUrl(item.source.url)"
+                    class="btn ghost compact"
+                    type="button"
+                    :title="`在浏览器打开来源 ${item.source.url}`"
+                    @click="openTodoSource(item)"
+                  >
+                    打开来源
+                  </button>
+                </li>
+              </ul>
+            </section>
+          </div>
           <p v-else-if="!todoSection?.error" class="focus-empty">暂无未完成待办</p>
-          <p v-if="todoSection && todoSection.total > todoSection.items.length" class="focus-more">
-            还有 {{ todoSection.total - todoSection.items.length }} 项，进入待办查看
+          <p v-if="todoSection && todoSection.total > shownTodoCount" class="focus-more">
+            还有 {{ todoSection.total - shownTodoCount }} 项，进入待办查看
           </p>
         </section>
 

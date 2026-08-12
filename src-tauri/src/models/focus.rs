@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ActionSignal, TodoSource};
+use super::{ActionSignal, RepeatRule, TodoSource};
 
 /// Per-section load state of the Focus read-only projection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,6 +24,35 @@ pub struct FocusTodo {
     /// Optional external source (GitHub PR / issue) for the "open source"
     /// action in the Focus view; `None` for plain todos.
     pub source: Option<TodoSource>,
+    /// Optional due date (`YYYY-MM-DD` or RFC3339); used for grouping.
+    pub due_date: Option<String>,
+    /// Optional reminder time (RFC3339) carried over for display.
+    pub remind_at: Option<String>,
+    /// Optional repeat rule carried over for display ("每 X 重复").
+    pub repeat: Option<RepeatRule>,
+}
+
+/// One due-state group of the Focus todo section. Keys are stable:
+/// `overdue` / `today` / `soon` / `none`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusTodoGroup {
+    pub key: String,
+    pub title: String,
+    pub count: usize,
+    pub items: Vec<FocusTodo>,
+}
+
+/// Todo section of the Focus projection, grouped by due state. Non-empty
+/// groups only, in priority order (overdue → today → soon → none).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusTodoSection {
+    pub state: FocusSectionState,
+    pub error: Option<String>,
+    /// Total incomplete todos before the display cap.
+    pub total: usize,
+    pub groups: Vec<FocusTodoGroup>,
 }
 
 /// One pinned or recently-updated Note shown in the Focus view.
@@ -84,7 +113,7 @@ pub struct FocusSection<T> {
 #[serde(rename_all = "camelCase")]
 pub struct FocusOverview {
     pub generated_at: String,
-    pub todo: FocusSection<FocusTodo>,
+    pub todo: FocusTodoSection,
     pub note: FocusSection<FocusNote>,
     pub github: FocusSection<FocusGithub>,
 }

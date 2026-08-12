@@ -17,9 +17,16 @@ function scheduleRefresh(refresh: () => Promise<void>) {
 export const useFocusStore = defineStore("focus", () => {
   const overview = ref<FocusOverview | null>(null);
   const loading = ref(false);
+  /** Todo id requested by a notification click; cleared after highlighting. */
+  const focusTodoId = ref<string | null>(null);
   /** Global IPC-level error; per-domain failures live in the overview. */
   const error = ref<string | null>(null);
   let inFlight: Promise<void> | null = null;
+
+  const requestFocus = (id: string) => {
+    focusTodoId.value = id;
+    void refresh();
+  };
 
   const refresh = async () => {
     if (inFlight) return inFlight;
@@ -56,5 +63,5 @@ export const useFocusStore = defineStore("focus", () => {
     await refresh();
   };
 
-  return { overview, loading, error, init, refresh };
+  return { overview, loading, focusTodoId, error, init, refresh, requestFocus };
 });
