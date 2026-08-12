@@ -15,6 +15,9 @@
 | #19 | GitHub 条目转 Todo | #17/#18 | ✅ 已完成 | `codex/issue-19-github-todo` | [#24](https://github.com/wynxing/MayDolist/pull/24) | CI 绿 + 已合并 + issue 自动关闭 |
 | #20 | GitHub 可行动信号 | #18/#19 | ✅ 已完成 | `codex/issue-20-action-signals` | [#25](https://github.com/wynxing/MayDolist/pull/25) | CI 绿 + 已合并 + issue 自动关闭 |
 | #21 | 备份 / 导入 / 恢复 | 无 | ✅ 已完成 | `codex/issue-21-backup-restore` | [#26](https://github.com/wynxing/MayDolist/pull/26) | CI 绿 + 已合并 + issue 自动关闭 |
+| #29 | Todo 支持到期日、提醒与周期性任务 | 无 | 🚧 编排中 | `codex/issue-29-due-reminder` | 待创建 | 顺序 1：先做（地基） |
+| #30 | 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 | `codex/issue-30-command-palette` | 待创建 | 顺序 2：独立 |
+| #28 | Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 | `codex/issue-28-inbox-triage` | 待创建 | 顺序 3：依赖 #29 |
 
 ## 验收清单（#17 快速收集入口与 Inbox）
 
@@ -157,3 +160,19 @@
 - 收尾内容：RFC 分段清单 5 项逐项核对 ✅（#17-#21 → PR #22-#26）；总体验收标准 6 条逐条核对 ✅；回归确认（Todo / 便签 / GitHub 追踪 / 悬浮窗口 / 回收站 / 更新能力）无回归；完善 architecture.md 与 README.md（产品定位、模块关系、闭环流程「捕获 → 判断下一步 → 执行 → 回到来源」、非目标）；无新增持久化字段、无破坏性变更。
 - 全量校验全绿：pnpm check / pnpm build / cargo fmt --check / cargo clippy --all-targets -D warnings / cargo test（76 passed）。
 - **全量编排完成**：6 个 issue（#16-#21）全部 ✅，无下一轮 issue；巡检控制器不再创建新轮次，仅保留兜底巡检。
+
+## 编排启动（#29 → #30 → #28，2026-08-12）
+
+> 由产品对话建议产生（RFC 提案风格），用户确认开启全自动编排；执行顺序 #29 → #30 → #28。
+> 模式：复用巡检控制器 `maydolist-issue`（每小时兜底巡检）+ 每轮线程即时串联；本地五道门禁 + CI 绿后自动 squash 合并并关闭 issue。
+
+| Issue | 标题 | 依赖 | 状态 |
+| --- | --- | --- | --- |
+| [#29](https://github.com/wynxing/MayDolist/issues/29) | feat: Todo 支持到期日、提醒与周期性任务 | 无 | 🚧 编排中 |
+| [#30](https://github.com/wynxing/MayDolist/issues/30) | feat: 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 |
+| [#28](https://github.com/wynxing/MayDolist/issues/28) | feat: Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 |
+
+- 决策：顺序 #29→#30→#28（先到期日地基 → 命令面板独立 → triage 依赖到期日）；自动 squash 合并、不开人工评审；不 bump 版本 / 不发版。
+- 创建方式：`gh issue create --body-file`，正文遵循“目标问题 → 实现设计 → 任务清单 → 测试与验证 → 风险与回滚 → 非目标”。
+- #28 与 #29 设计上松耦合：#28 的“今天做 / 稍后做”在 #29 未实现时降级为移动列表，不阻塞；#28 将消费 #29 的 dueDate。
+- 失败策略：某轮同因失败连续 3 次 → 暂停自动化并通知用户，绝不跳过 issue；并发去重：创建线程前校验 activeThreadId。
