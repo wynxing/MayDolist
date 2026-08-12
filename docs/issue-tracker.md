@@ -16,7 +16,7 @@
 | #20 | GitHub 可行动信号 | #18/#19 | ✅ 已完成 | `codex/issue-20-action-signals` | [#25](https://github.com/wynxing/MayDolist/pull/25) | CI 绿 + 已合并 + issue 自动关闭 |
 | #21 | 备份 / 导入 / 恢复 | 无 | ✅ 已完成 | `codex/issue-21-backup-restore` | [#26](https://github.com/wynxing/MayDolist/pull/26) | CI 绿 + 已合并 + issue 自动关闭 |
 | #29 | Todo 支持到期日、提醒与周期性任务 | 无 | ✅ 已完成 | `codex/issue-29-due-reminder` | [#31](https://github.com/wynxing/MayDolist/pull/31) | CI 全绿 + 已合并（merge commit `c23d994`）+ issue 自动关闭 |
-| #30 | 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 | `codex/issue-30-command-palette` | 待创建 | 顺序 2：独立 |
+| #30 | 全局命令面板（Ctrl+K） | 无 | ✅ 已完成 | `codex/issue-30-command-palette` | [#32](https://github.com/wynxing/MayDolist/pull/32) | CI 全绿 + 已合并（merge commit `51dfec6`）+ issue 自动关闭 |
 | #28 | Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 | `codex/issue-28-inbox-triage` | 待创建 | 顺序 3：依赖 #29 |
 
 ## 验收清单（#17 快速收集入口与 Inbox）
@@ -169,7 +169,7 @@
 | Issue | 标题 | 依赖 | 状态 |
 | --- | --- | --- | --- |
 | [#29](https://github.com/wynxing/MayDolist/issues/29) | feat: Todo 支持到期日、提醒与周期性任务 | 无 | ✅ 已完成 |
-| [#30](https://github.com/wynxing/MayDolist/issues/30) | feat: 全局命令面板（Ctrl+K） | 无 | ⬜ 待排期 |
+| [#30](https://github.com/wynxing/MayDolist/issues/30) | feat: 全局命令面板（Ctrl+K） | 无 | ✅ 已完成 |
 | [#28](https://github.com/wynxing/MayDolist/issues/28) | feat: Inbox 逐条处理模式（triage） | #17 Inbox | ⬜ 待排期 |
 
 - 决策：顺序 #29→#30→#28（先到期日地基 → 命令面板独立 → triage 依赖到期日）；自动 squash 合并、不开人工评审；不 bump 版本 / 不发版。
@@ -183,3 +183,10 @@
 - 完成证据：PR [#31](https://github.com/wynxing/MayDolist/pull/31)（CI 全绿，首次 5m27s，rebase 后 3m9s）→ squash 合并（merge commit `c23d994`）→ issue #29 自动关闭（2026-08-12 14:32 +08）。
 - 实现要点：TodoItem 新增可选 `dueDate` / `remindAt` / `repeat` / `repeatUntil`（serde 默认值向后兼容，落盘跳过 None）；Focus 按「已逾期 > 今天到期 > 近期 7 天 > 无日期」分组并输出分组元信息，逾期高亮 + 数量标识；后台调度到期提醒（Windows Toast，点击聚焦条目），托盘红色逾期数字徽标（0 隐藏）；完成周期任务时 service 层原子生成下一次实例（月末钳制，repeatUntil 停止，保留来源）；快速捕捉日期前缀解析（明天 / 周X / N天后 / 月底）；Todo 编辑 UI 设置/清除到期日与周期规则；配置新增可选安静时段 `quietHours`（跨午夜）；前端不直接写文件；cargo test 115 passed。
 - 下一轮：#30 全局命令面板（Ctrl+K），线程已即时创建（threadId `019ff4b2-45f8-7783-af30-3afbb3037cd1`，worktree `09da`，分支 `codex/issue-30-command-palette`），开场指令见本轮交接摘要。
+
+### 轮次 2（#30，已完成，2026-08-12）
+
+- #30 执行线程已创建并完成：threadId `019ff4b2-45f8-7783-af30-3afbb3037cd1`，worktree `09da`，分支 `codex/issue-30-command-palette`；activeThreadId 已清除。
+- 完成证据：PR [#32](https://github.com/wynxing/MayDolist/pull/32)（CI 首次失败为测试环境差异：CI runner 未安装 gh，离线断言依赖本地登录态；修复为确定性断言后 3m3s 全绿）→ squash 合并（merge commit `51dfec6`）→ issue #30 自动关闭（2026-08-12 15:04 +08）。
+- 实现要点：配置新增可选 `commandPaletteHotkey`（默认 `Ctrl+K`）/ `commandPaletteEnabled`（serde 默认值向后兼容，旧配置自动补齐）；Rust app 层注册全局快捷键，复用轻量无边框窗口框架创建 `command-palette` 窗口（呼出居中于光标所在屏、回退主屏，与快速捕捉并存互不影响）；`palette_search` 并发检索 Todo（未完成，含收件箱）/ 便签全文 / GitHub 本地缓存并按域限制 8 条，离线只读缓存并标注「离线缓存」；命令列表（切换 Tab / 新建 Todo / 新建便签 / 立即备份 / 打开数据目录）与结果动作（完成 / 打开来源 / 跳转模块 / 置顶便签）全部复用现有 command 与 stores，不新增写路径、前端不直接写文件；输入即搜防抖 150ms、↑/↓/Enter/Esc、输入法组合输入不触发执行、空结果显示引导文案、长标题截断；设置页可修改或关闭快捷键（冲突 / 非法配置保存时报错）；文档同步更新 architecture.md 与 README.md；cargo test 130 passed。
+- 下一轮：#28 Inbox 逐条处理模式（triage），线程已即时创建（threadId `待回写`，worktree `待回写`，分支 `codex/issue-28-inbox-triage`），开场指令见本轮交接摘要。
