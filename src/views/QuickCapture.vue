@@ -7,6 +7,7 @@ import { useSettingsStore } from "../stores/settings";
 const text = ref("");
 const error = ref("");
 const busy = ref(false);
+const submitted = ref(false);
 const input = ref<HTMLInputElement | null>(null);
 let unlisten: UnlistenFn | null = null;
 
@@ -34,7 +35,11 @@ async function submit() {
   try {
     await api.submit(text.value);
     text.value = "";
-    await api.hide();
+    submitted.value = true;
+    window.setTimeout(() => {
+      submitted.value = false;
+      void api.hide();
+    }, 120);
   } catch (err) {
     // Keep the input content so nothing is silently lost on failure.
     error.value = String(err);
@@ -65,7 +70,7 @@ function onEsc() {
     >
       ×
     </button>
-    <form class="quick-form glass-card" @submit.prevent="submit">
+    <form class="quick-form glass-card" :class="{ 'is-submitted': submitted }" @submit.prevent="submit">
       <label class="sr-only" for="quick-input">快速收集</label>
       <input
         id="quick-input"

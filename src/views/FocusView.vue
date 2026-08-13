@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import EmptyState from "../components/EmptyState.vue";
+import PageHeader from "../components/PageHeader.vue";
+import PinMark from "../components/PinMark.vue";
 import { openNoteInModule } from "../navigation";
 import { useFocusStore } from "../stores/focus";
 import { useGithubStore } from "../stores/github";
@@ -174,15 +177,17 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
 
 <template>
   <section class="focus-view" aria-labelledby="focus-heading">
-    <header class="focus-topbar">
-      <div>
-        <h1 id="focus-heading">今日焦点</h1>
-        <p>未完成待办（收件箱优先）· 置顶 / 最近更新便签 · GitHub 需要行动的条目</p>
-      </div>
-      <button class="btn" type="button" :disabled="focus.loading" @click="focus.refresh()">
-        {{ focus.loading ? "刷新中…" : "刷新" }}
-      </button>
-    </header>
+    <PageHeader
+      heading-id="focus-heading"
+      title="今日焦点"
+      subtitle="未完成待办（收件箱优先）· 置顶 / 最近更新便签 · GitHub 需要行动的条目"
+    >
+      <template #actions>
+        <button class="btn" type="button" :disabled="focus.loading" @click="focus.refresh()">
+          {{ focus.loading ? "刷新中…" : "刷新" }}
+        </button>
+      </template>
+    </PageHeader>
 
     <p v-if="focus.error" class="error" role="alert">
       聚合数据加载失败：{{ focus.error }}（保留上次内容）
@@ -196,9 +201,11 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
     <template v-else>
       <p v-if="focus.loading" class="focus-refreshing" role="status">正在刷新…</p>
 
-      <div v-if="allEmpty && !hasError" class="focus-all-empty">
-        今天没有需要处理的事情：没有未完成待办、置顶 / 最近便签，也没有需要行动的 GitHub 条目。
-      </div>
+      <EmptyState
+        v-if="allEmpty && !hasError"
+        title="今天很安静"
+        text="没有未完成待办、置顶便签，也没有需要行动的 GitHub 条目。用快速收集记下下一件事。"
+      />
 
       <div class="focus-sections">
         <section class="focus-section glass-card" aria-labelledby="focus-todo-title">
@@ -256,7 +263,7 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                   </div>
                   <button
                     v-if="item.source && isHttpUrl(item.source.url)"
-                    class="btn ghost compact"
+                    class="btn ghost compact row-actions"
                     type="button"
                     :title="`在浏览器打开来源 ${item.source.url}`"
                     @click="openTodoSource(item)"
@@ -290,12 +297,12 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
             <li v-for="item in noteSection.items" :key="item.id" class="focus-item">
               <button class="focus-item-main" type="button" @click="openNote(item)">
                 <span class="focus-item-title" :title="item.title">
-                  {{ item.pinned ? "📌 " : "" }}{{ item.title }}
+                  <PinMark :on="item.pinned" />{{ item.title }}
                 </span>
                 <small v-if="item.preview" class="focus-item-preview">{{ item.preview }}</small>
                 <small class="focus-item-meta">{{ formatTime(item.updatedAt) }}</small>
               </button>
-              <button class="btn ghost compact" type="button" title="悬浮" @click="floatNote(item)">
+              <button class="btn ghost compact row-actions" type="button" title="悬浮" @click="floatNote(item)">
                 悬浮
               </button>
             </li>
@@ -336,7 +343,7 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                   >
                     {{ b.label }}
                   </span>
-                  {{ item.pinned ? "📌 " : "" }}#{{ item.number }} {{ item.title }}
+                  <PinMark v-if="item.pinned" on />#{{ item.number }} {{ item.title }}
                 </span>
                 <small class="focus-item-meta">
                   {{ item.repo }} · 更新 {{ formatTime(item.updatedAt) }}
@@ -344,7 +351,7 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                 <small v-if="githubSource(item)" class="focus-item-source">{{ githubSource(item) }}</small>
               </button>
               <button
-                class="btn ghost compact"
+                class="btn ghost compact row-actions"
                 type="button"
                 :title="`在浏览器打开 #${item.number}`"
                 @click="openGithub(item)"

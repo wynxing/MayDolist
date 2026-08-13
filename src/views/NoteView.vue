@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import ConfirmBar from "../components/ConfirmBar.vue";
+import EmptyState from "../components/EmptyState.vue";
+import PageHeader from "../components/PageHeader.vue";
+import PinMark from "../components/PinMark.vue";
 import { consumePendingNoteId, pendingNoteId } from "../navigation";
+import { NOTE_COLORS, noteColorId } from "../noteColor";
 import { useNoteStore } from "../stores/note";
 
 const store = useNoteStore();
@@ -12,6 +17,7 @@ const content = ref("");
 const tagsText = ref("");
 const status = ref("");
 const dirty = ref(false);
+const pendingDelete = ref(false);
 let timer: number | undefined;
 let applyingRemote = false;
 
@@ -22,10 +28,10 @@ const shown = computed(() => store.notes.filter((note) => {
   return matchesQuery && (!selectedTag.value || note.tags.includes(selectedTag.value));
 }));
 const allTags = computed(() => [...new Set(store.notes.flatMap((note) => note.tags))].sort());
+const selectedNote = computed(() => store.notes.find((note) => note.id === selectedId.value) ?? null);
 
 onMounted(async () => {
   await store.init();
-  // The Focus view may hand us a note id to open (before the tab mounts).
   watch(
     pendingNoteId,
     (id) => {
@@ -60,14 +66,21 @@ async function applyNote(note: { title: string; content: string; tags: string[] 
   content.value = note.content;
   tagsText.value = note.tags.join(", ");
   dirty.value = false;
+  pendingDelete.value = false;
   await nextTick();
   applyingRemote = false;
 }
 
 function choose(id: string) {
   selectedId.value = id;
+  pendingDelete.value = false;
   const note = store.notes.find((value) => value.id === id);
   if (note) void applyNote(note);
+}
+
+function preview(text: string) {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.slice(0, 48);
 }
 
 async function add() {
@@ -100,6 +113,18 @@ async function save() {
   }
 }
 
+async function setColor(color: string) {
+  if (!selectedId.value) return;
+  await store.update(selectedId.value, { color });
+}
+
+async function confirmDelete() {
+  if (!selectedId.value) return;
+  await store.remove(selectedId.value);
+  selectedId.value = null;
+  pendingDelete.value = false;
+}
+
 watch([title, content, tagsText], () => {
   if (applyingRemote || !selectedId.value) return;
   dirty.value = true;
@@ -127,32 +152,82 @@ watch(
 </script>
 
 <template>
-  <section class="pane-view">
-    <aside class="list-pane">
-      <button class="btn primary" @click="add">新建便签</button>
-      <input v-model="query" class="input" placeholder="搜索标题、正文、标签" />
-      <select v-model="selectedTag" class="input">
-        <option value="">全部标签</option>
-        <option v-for="tag in allTags" :key="tag">{{ tag }}</option>
-      </select>
-      <ul class="select-list">
-        <li v-for="note in shown" :key="note.id" :class="{ active: selectedId === note.id }" @click="choose(note.id)">
-          <b>{{ note.pinned ? "📌 " : "" }}{{ note.title }}</b>
-          <small>{{ note.tags.join(" · ") }}</small>
-        </li>
-      </ul>
-    </aside>
-    <div v-if="selectedId" class="editor-pane">
-      <input v-model="title" class="input editor-title" />
-      <input v-model="tagsText" class="input" placeholder="标签，以逗号分隔" />
-      <textarea v-model="content" class="input editor-content" placeholder="记录内容…"></textarea>
-      <div class="editor-footer">
-        <span>{{ status }}</span>
-        <button class="btn" @click="store.update(selectedId, { pinned: !store.notes.find((note) => note.id === selectedId)?.pinned })">置顶</button>
-        <button class="btn" @click="store.float(selectedId)">悬浮</button>
-        <button class="btn danger" @click="store.remove(selectedId); selectedId = null">删除</button>
+  <section class="note-view" aria-labelledby="note-heading">
+    <PageHeader heading-id="note-heading" title="我的便签" subtitle="把想法留在手边，需要时再拖到桌面。">
+      <template #actions>
+        <button class="btn primary" type="button" @click="add">新建便签</button>
+      </template>
+    </PageHeader>
+
+    <div class="pane-view">
+      <aside class="list-pane" aria-label="便签列表">
+        <input v-model="query" class="input" placeholder="搜索标题、正文、标签" />
+        <select v-model="selectedTag" class="input">
+          <option value="">全部标签</option>
+          <option v-for="tag in allTags" :key="tag">{{ tag }}</option>
+        </select>
+        <div v-if="shown.length" class="select-list" role="listbox">
+          <button
+            v-for="note in shown"
+            :key="note.id"
+            type="button"
+            role="option"
+            class="note-accent"
+            :class="{ active: selectedId === note.id }"
+            :data-color="noteColorId(note.color)"
+            :aria-selected="selectedId === note.id"
+            @click="choose(note.id)"
+          >
+            <span class="select-title">
+              <PinMark :on="note.pinned" />{{ note.title }}
+            </span>
+            <small v-if="note.tags.length" class="select-meta">{{ note.tags.join(" · ") }}</small>
+            <small v-else-if="preview(note.content)" class="select-preview">{{ preview(note.content) }}</small>
+          </button>
+        </div>
+        <EmptyState v-else text="没有匹配的便签" action-label="新建便签" @action="add" />
+      </aside>
+      <div v-if="selectedId && selectedNote" class="editor-pane">
+        <input v-model="title" class="input editor-title" aria-label="便签标题" />
+        <input v-model="tagsText" class="input" placeholder="标签，以逗号分隔" />
+        <textarea v-model="content" class="input editor-content" placeholder="记录内容…"></textarea>
+        <ConfirmBar
+          v-if="pendingDelete"
+          message="将这条便签移入回收站？"
+          confirm-label="移入回收站"
+          danger
+          @confirm="confirmDelete"
+          @cancel="pendingDelete = false"
+        />
+        <div class="editor-footer">
+          <span :class="{ error: status.startsWith('Error') || status.includes('失败') }" role="status">
+            {{ status }}
+          </span>
+          <div class="note-color-dots" role="group" aria-label="便签颜色">
+            <button
+              v-for="color in NOTE_COLORS"
+              :key="color.id"
+              class="note-color-dot"
+              :class="{ active: noteColorId(selectedNote.color) === color.id }"
+              :data-color="color.id"
+              type="button"
+              :title="color.label"
+              :aria-label="`颜色：${color.label}`"
+              @click="setColor(color.id)"
+            />
+          </div>
+          <button
+            class="btn"
+            type="button"
+            @click="store.update(selectedId, { pinned: !selectedNote.pinned })"
+          >
+            {{ selectedNote.pinned ? "取消置顶" : "置顶" }}
+          </button>
+          <button class="btn" type="button" @click="store.float(selectedId)">悬浮</button>
+          <button class="btn danger" type="button" @click="pendingDelete = true">删除</button>
+        </div>
       </div>
+      <EmptyState v-else title="还没有打开便签" text="选择左侧一条，或新建一条开始写。" action-label="新建便签" @action="add" />
     </div>
-    <div v-else class="empty-state">选择或新建一条便签</div>
   </section>
 </template>

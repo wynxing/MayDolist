@@ -394,6 +394,7 @@ mod tests {
             remind_at: None,
             repeat: None,
             repeat_until: None,
+            last_reminded_at: None,
         }
     }
 

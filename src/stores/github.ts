@@ -1,7 +1,16 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import * as api from "../api/github";
 import type { GhAuthStatus, RepoSnapshot, RepoWatch } from "../types/github";
+
+let ready = false;
+let timer: number | undefined;
+
+function scheduleRefresh(refresh: () => Promise<void>) {
+  clearTimeout(timer);
+  timer = window.setTimeout(() => void refresh(), 150);
+}
 
 export const useGithubStore = defineStore("github", () => {
   const auth = ref<GhAuthStatus | null>(null);
@@ -27,12 +36,22 @@ export const useGithubStore = defineStore("github", () => {
     }
   };
 
+  const init = async () => {
+    if (!ready) {
+      ready = true;
+      await listen<{ domain: string }>("entity-changed", (e) => {
+        if (e.payload.domain === "github") scheduleRefresh(load);
+      });
+    }
+    await load();
+  };
+
   return {
     auth,
     watchlist,
     snapshots,
     error,
-    init: load,
+    init,
     refresh: async () => {
       snapshots.value = await api.refreshAll();
       watchlist.value = await api.watchlist();

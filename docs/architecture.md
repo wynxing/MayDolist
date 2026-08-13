@@ -1,6 +1,6 @@
 # MayDolist 架构文档
 
-> 状态：设计基线 · 最后更新：2026-08-12
+> 状态：设计基线 · 最后更新：2026-08-13
 
 本文档描述 MayDolist 的系统架构与关键设计决策，作为后续实现与迭代的设计基线。文档只做设计陈述，不包含实现代码；实际实现以其为准，如需调整设计，请先更新本文档并记录 ADR。
 
@@ -238,7 +238,7 @@ MayDolist/
 - 每个实体文件均含 `schemaVersion` 字段，用于未来格式迁移。
 - `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
 - Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）；旧数据无该字段时按无来源读取，序列化时缺省字段不落盘，向后兼容。
-- Todo 条目可携带可选的 `dueDate`（ISO 日期或 RFC3339 日期时间）、`remindAt`（RFC3339，仅与 `dueDate` 同时有意义）、`repeat`（`daily` / `weekly` / `biweekly` / `monthly`）与 `repeatUntil`（日期，停止重复生成）；旧数据无字段时按空值读取、落盘跳过 `None`，JSON 形状保持向后兼容。非法日期 / 非法组合在 service 层拒绝写入；读取时降级为无日期，不崩溃。
+- Todo 条目可携带可选的 `dueDate`（ISO 日期或 RFC3339 日期时间）、`remindAt`（RFC3339，仅与 `dueDate` 同时有意义）、`repeat`（`daily` / `weekly` / `biweekly` / `monthly`）、`repeatUntil`（日期，停止重复生成）与 `lastRemindedAt`（已送达或安静时段抑制的提醒时间）；旧数据无字段时按空值读取、落盘跳过 `None`，JSON 形状保持向后兼容。非法日期 / 非法组合在 service 层拒绝写入；读取时降级为无日期，不崩溃。
 - `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
 - 仓库快照的每个条目含可选信号字段（`assignees` / `reviewers` / `headSha` / `checksState` / `signals`），快照级 `signalsComputedAt` 记录信号计算时间；旧快照缺字段时按空值读取，刷新成功后自动补全（向后兼容，不需要迁移）。
 - 行动信号是稳定枚举（`needsAction` / `needsReview` / `ciFailed` / `stale` / `draft`），UI 只消费该枚举，不依赖 GitHub 原始字符串；`stale` 依据 `config.json` 的 `githubStaleDays`（默认 14 天，0 关闭）在读取快照时实时计算。
@@ -333,7 +333,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 手动刷新（全部或单仓库）+ 定时刷新（默认 30 分钟，可配置）。全部刷新按仓库**串行**执行（单进程内逐个 gh 调用），并用 `refreshing` 集合防止同一仓库并发重复刷新；单仓库失败只在该仓库快照上记录 `lastError` 并保留旧缓存，不清空其他仓库数据。
 - 刷新失败、认证失败、网络失败或 API 缺字段时降级：保留上次本地快照继续展示（缺信号字段的旧快照标注「旧缓存」，刷新后自动补全）。
 - 点击条目在系统浏览器打开对应页面。
-- PR / Issue 行提供「转为 Todo」：调用 Todo 领域命令（`todo_create_from_github`），默认标题为「仓库 #编号 标题」，条目默认进入收件箱（复用 `ensure_inbox` 幂等逻辑），写入带来源的 Todo；同一 GitHub 条目允许重复转换（去重留待后续版本）。该操作只触碰 Todo 域，不改变 GitHub 缓存、认证与网络状态。
+- PR / Issue 行提供「转为 Todo」：调用 Todo 领域命令（`todo_create_from_github`），默认标题为「仓库 #编号 标题」，条目默认进入收件箱（复用 `ensure_inbox` 幂等逻辑），写入带来源的 Todo；同一 `repo` + `number` 的未完成条目会复用已有 Todo，不再重复创建。该操作只触碰 Todo 域，不改变 GitHub 缓存、认证与网络状态。
 
 ### 6.6 Focus 今日视图
 
@@ -347,7 +347,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
 ### 6.9 到期提醒、托盘徽标与周期任务
 
-- **提醒调度**：Rust 后台线程每 15 秒扫描全部未完成 Todo，命中 `remindAt <= now` 且 `dueDate` 存在的条目时发送 Windows 系统通知（标题「MayDolist 到期提醒」，正文为任务标题、来源清单与截止日期）。通知带「查看待办」按钮，点击打开主面板并聚焦对应条目（`focus-todo` 事件 → Focus 视图滚动 + 闪烁高亮）。
+- **提醒调度**：Rust 后台线程每 15 秒扫描全部未完成 Todo（Todo 列表带内存缓存，写时失效），命中 `remindAt <= now` 且 `dueDate` 存在、且 `lastRemindedAt` 尚未等于该 `remindAt` 的条目时发送 Windows 系统通知。送达或安静时段抑制后都会写入 `lastRemindedAt`，进程重启不会连弹。通知带「查看待办」按钮，点击打开主面板并聚焦对应条目（`focus-todo` 事件 → Focus 视图滚动 + 闪烁高亮）。
 - **静默降级**：通知被系统拦截、权限缺失或开发模式无 AUMID 时只记日志，不阻断主流程；托盘徽标始终保留为被动信号。安静时段内同样只保留徽标，不弹通知。
 - **托盘徽标**：逾期计数（`dueDate < 今天` 的未完成项）以红色数字徽标显示在托盘图标上，并同步更新 tooltip；数量为 0 时恢复默认图标并隐藏徽标。徽标由 Rust 端 16×16 RGBA 光栅化生成（内嵌 3×5 点阵数字），不依赖字体或网络。
 - **通知实现**：使用 `tauri-winrt-notification`（Windows Toast），toast 线程保持 COM 公寓存活直到被点击 / 关闭；开发模式下无注册 AUMID 时静默失败降级。

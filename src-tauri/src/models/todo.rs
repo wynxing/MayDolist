@@ -189,6 +189,11 @@ pub struct TodoItem {
     /// generated after this date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat_until: Option<String>,
+    /// Last reminder timestamp that was delivered (or suppressed during quiet
+    /// hours). Equal to `remind_at` when that reminder has already been
+    /// handled, so a process restart does not toast again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reminded_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -251,10 +256,12 @@ mod tests {
         assert_eq!(item.remind_at, None);
         assert_eq!(item.repeat, None);
         assert_eq!(item.repeat_until, None);
+        assert_eq!(item.last_reminded_at, None);
         let raw = serde_json::to_string(&item).unwrap();
         assert!(!raw.contains("dueDate"));
         assert!(!raw.contains("remindAt"));
         assert!(!raw.contains("repeat"));
+        assert!(!raw.contains("lastRemindedAt"));
     }
 
     #[test]
@@ -272,6 +279,7 @@ mod tests {
             remind_at: Some("2026-08-20T09:00:00+08:00".into()),
             repeat: Some(RepeatRule::Weekly),
             repeat_until: Some("2026-12-31".into()),
+            last_reminded_at: None,
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("\"dueDate\":\"2026-08-20\""));

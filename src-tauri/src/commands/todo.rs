@@ -105,6 +105,7 @@ pub struct TodoFromGithubResult {
     pub repo: String,
     pub number: u64,
     pub target_list_id: String,
+    pub already_existed: bool,
 }
 
 /// Create a Todo from a GitHub issue / PR. The item always lands in the
@@ -120,11 +121,13 @@ pub fn todo_create_from_github(
     title: String,
     url: String,
 ) -> AppResult<TodoFromGithubResult> {
-    let (list, item) = state
+    let (list, item, created) = state
         .services
         .todo
         .create_item_from_github(&kind, &repo, number, &title, &url)?;
-    emit_entity_changed(&app, "todoItem", &item.id, "created")?;
+    if created {
+        emit_entity_changed(&app, "todoItem", &item.id, "created")?;
+    }
     Ok(TodoFromGithubResult {
         source_type: kind,
         id: item.id,
@@ -132,6 +135,7 @@ pub fn todo_create_from_github(
         repo,
         number,
         target_list_id: list.id,
+        already_existed: !created,
     })
 }
 #[tauri::command]

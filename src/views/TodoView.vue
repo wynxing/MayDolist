@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ConfirmBar from "../components/ConfirmBar.vue";
 import EmptyState from "../components/EmptyState.vue";
+import PageHeader from "../components/PageHeader.vue";
 import { open } from "../api/github";
 import type { TodoScheduleInput } from "../api/todo";
 import { useTodoStore } from "../stores/todo";
@@ -32,6 +34,8 @@ const dragListId = ref<string | null>(null);
 const dropListId = ref<string | null>(null);
 const dragItem = ref<{ from: string; id: string } | null>(null);
 const dropItemId = ref<string | null>(null);
+const pendingConfirm = ref<{ kind: "list" | "item"; id: string; title: string } | null>(null);
+const completingIds = ref<Set<string>>(new Set());
 
 const hasLists = computed(() => store.lists.length > 0);
 
@@ -113,19 +117,38 @@ function cancelListEdit() {
 }
 
 async function deleteList(list: TodoList) {
-  if (!window.confirm(`将清单“${list.title}”移入回收站？`)) return;
-  await store.updateList(list.id, { deleted: true });
+  pendingConfirm.value = { kind: "list", id: list.id, title: list.title };
 }
 
 async function deleteItem(item: TodoItem) {
-  if (!window.confirm(`将待办“${item.title}”移入回收站？`)) return;
-  await store.softDelete(item.id);
-  closeItemDetails(item.id);
+  pendingConfirm.value = { kind: "item", id: item.id, title: item.title };
+}
+
+async function confirmPending() {
+  const pending = pendingConfirm.value;
+  if (!pending) return;
+  pendingConfirm.value = null;
+  if (pending.kind === "list") {
+    await store.updateList(pending.id, { deleted: true });
+    return;
+  }
+  await store.softDelete(pending.id);
+  closeItemDetails(pending.id);
 }
 
 async function toggleItemCompleted(item: TodoItem) {
-  await store.toggleItem(item.id, item.completed);
-  closeItemDetails(item.id);
+  if (!item.completed) {
+    completingIds.value = new Set(completingIds.value).add(item.id);
+    await new Promise((resolve) => window.setTimeout(resolve, 160));
+  }
+  try {
+    await store.toggleItem(item.id, item.completed);
+    closeItemDetails(item.id);
+  } finally {
+    const next = new Set(completingIds.value);
+    next.delete(item.id);
+    completingIds.value = next;
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -530,29 +553,38 @@ function onItemDragEnd() {
 
 <template>
   <section class="todo-view" aria-labelledby="todo-heading">
-    <header class="todo-topbar">
-      <div>
-        <h1 id="todo-heading">我的待办</h1>
-        <p>把今天要做的事收进清单。</p>
-      </div>
-      <div class="todo-topbar-actions">
-        <form class="todo-create-list" @submit.prevent="addList">
-          <label class="sr-only" for="new-list">新清单名称</label>
-          <input id="new-list" v-model="newList" class="input" placeholder="新建清单" />
-          <button class="btn primary" type="submit">新建清单</button>
-        </form>
-        <button
-          v-if="!triageActive && inboxList"
-          class="btn primary"
-          type="button"
-          :disabled="inboxPending.length === 0"
-          title="进入收件箱逐条处理模式"
-          @click="startTriage"
-        >
-          处理模式
-        </button>
-      </div>
-    </header>
+    <PageHeader heading-id="todo-heading" title="我的待办" subtitle="把今天要做的事收进清单。">
+      <template #actions>
+        <div class="todo-topbar-actions">
+          <form class="todo-create-list" @submit.prevent="addList">
+            <label class="sr-only" for="new-list">新清单名称</label>
+            <input id="new-list" v-model="newList" class="input" placeholder="新建清单" />
+            <button class="btn primary" type="submit">新建清单</button>
+          </form>
+          <button
+            v-if="!triageActive && inboxList"
+            class="btn primary"
+            type="button"
+            :disabled="inboxPending.length === 0"
+            title="进入收件箱逐条处理模式"
+            @click="startTriage"
+          >
+            处理模式
+          </button>
+        </div>
+      </template>
+    </PageHeader>
+
+    <ConfirmBar
+      v-if="pendingConfirm"
+      :message="pendingConfirm.kind === 'list'
+        ? `将清单“${pendingConfirm.title}”移入回收站？`
+        : `将待办“${pendingConfirm.title}”移入回收站？`"
+      confirm-label="移入回收站"
+      danger
+      @confirm="confirmPending"
+      @cancel="pendingConfirm = null"
+    />
 
     <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
     <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
@@ -589,7 +621,13 @@ function onItemDragEnd() {
       </div>
 
       <template v-else-if="triageCurrent">
-        <article ref="triageCardEl" class="triage-card glass-card" tabindex="0">
+        <Transition name="triage-slide" mode="out-in">
+          <article
+            :key="triageCurrent.id"
+            ref="triageCardEl"
+            class="triage-card glass-card"
+            tabindex="0"
+          >
           <p class="triage-card-title">{{ triageCurrent.title }}</p>
           <div class="triage-card-meta">
             <span
@@ -607,6 +645,7 @@ function onItemDragEnd() {
             </span>
           </div>
         </article>
+        </Transition>
 
         <div class="triage-actions" role="group" aria-label="处理动作">
           <button
@@ -748,7 +787,7 @@ function onItemDragEnd() {
             v-for="(item, itemIndex) in pendingItems(list)"
             :key="item.id"
             class="todo-item"
-            :class="{ 'drop-target': dropItemId === item.id }"
+            :class="{ 'drop-target': dropItemId === item.id, 'is-completing': completingIds.has(item.id) }"
             draggable="true"
             @dragstart="onItemDragStart($event, list.id, item.id)"
             @dragover="onItemDragOver($event, item.id)"
@@ -979,7 +1018,7 @@ function onItemDragEnd() {
       </article>
       </div>
 
-      <EmptyState v-else text="还没有清单，先新建一个，把第一件事记下来。" />
+      <EmptyState v-else title="还没有清单" text="先新建一个，把第一件事记下来。" />
     </template>
   </section>
 </template>

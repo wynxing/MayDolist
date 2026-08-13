@@ -3,7 +3,6 @@ use crate::{
     models::{AppConfig, Note, WindowBounds},
     AppState,
 };
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -218,6 +217,7 @@ fn build_tray(app: &AppHandle) -> AppResult<()> {
                 app.emit("tray-action", "new-note").ok();
             }
             "refresh" => {
+                show_main(app).ok();
                 app.emit("tray-action", "refresh-github").ok();
             }
             "settings" => {
@@ -511,23 +511,16 @@ fn spawn_github_refresh(app: AppHandle) {
 /// receives the `focus-todo` event when a toast is clicked.
 fn spawn_due_tracking(app: AppHandle) {
     std::thread::spawn(move || {
-        let mut fired: HashSet<(String, String)> = HashSet::new();
         let mut last_overdue: Option<usize> = None;
-        // A stale app run may have pending reminders; do the first scan
-        // immediately instead of waiting one full tick.
-        tick_due_tracking(&app, &mut fired, &mut last_overdue);
+        tick_due_tracking(&app, &mut last_overdue);
         loop {
             std::thread::sleep(Duration::from_secs(15));
-            tick_due_tracking(&app, &mut fired, &mut last_overdue);
+            tick_due_tracking(&app, &mut last_overdue);
         }
     });
 }
 
-fn tick_due_tracking(
-    app: &AppHandle,
-    fired: &mut HashSet<(String, String)>,
-    last_overdue: &mut Option<usize>,
-) {
+fn tick_due_tracking(app: &AppHandle, last_overdue: &mut Option<usize>) {
     let state = app.state::<AppState>();
     let lists = match state.services.todo.list(false) {
         Ok(lists) => lists,
@@ -546,10 +539,6 @@ fn tick_due_tracking(
         .and_then(|config| config.quiet_hours);
     let local_now = chrono::Local::now();
     for due in crate::services::reminder::due_reminders(&lists, &now) {
-        let key = (due.id.clone(), due.remind_at.clone());
-        if fired.contains(&key) {
-            continue;
-        }
         let quiet = quiet_hours
             .as_ref()
             .is_some_and(|window| window.contains(local_now.time()));
@@ -559,17 +548,11 @@ fn tick_due_tracking(
                 .log
                 .log("info", &format!("due reminder fired for {}", due.id));
         }
-        // Mark as fired either way: quiet-hours reminders stay silent (badge
-        // only) and never fire late.
-        fired.insert(key);
-    }
-    if fired.len() > 4096 {
-        let cutoff = now - chrono::Duration::days(30);
-        fired.retain(|(_, remind_at)| {
-            chrono::DateTime::parse_from_rfc3339(remind_at)
-                .map(|ts| ts.with_timezone(&chrono::Utc) >= cutoff)
-                .unwrap_or(true)
-        });
+        if let Err(err) = state.services.todo.mark_reminded(&due.id, &due.remind_at) {
+            state
+                .log
+                .log("error", &format!("failed to persist reminder state: {err}"));
+        }
     }
 
     let overdue = crate::services::reminder::overdue_count(&lists, local_now.date_naive());

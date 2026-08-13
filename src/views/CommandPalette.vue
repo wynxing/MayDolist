@@ -7,6 +7,7 @@ import * as githubApi from "../api/github";
 import * as noteApi from "../api/note";
 import * as paletteApi from "../api/palette";
 import * as quickApi from "../api/quick";
+import PinMark from "../components/PinMark.vue";
 import { useNoteStore } from "../stores/note";
 import { useTodoStore } from "../stores/todo";
 import type {
@@ -117,6 +118,13 @@ watch(query, (value) => {
   if (mode.value !== "search") return;
   clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => void runSearch(value), 150);
+});
+
+watch(selected, async () => {
+  await nextTick();
+  document
+    .querySelector<HTMLElement>(`.palette-row[data-index="${selected.value}"]`)
+    ?.scrollIntoView({ block: "nearest" });
 });
 
 function onKeydown(event: KeyboardEvent) {
@@ -403,7 +411,7 @@ onBeforeUnmount(() => {
               @click="openNote(note.id)"
             >
               <span class="palette-row-title" :title="note.title">
-                {{ note.pinned ? "📌 " : "" }}{{ note.title }}
+                <PinMark :on="note.pinned" />{{ note.title }}
               </span>
               <span class="palette-row-meta">
                 {{ note.preview || "（空内容）" }}

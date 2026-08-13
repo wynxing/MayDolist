@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { call } from "../api";
 import * as backupApi from "../api/backup";
+import ConfirmBar from "../components/ConfirmBar.vue";
 import { useSettingsStore } from "../stores/settings";
 import { useUpdateStore } from "../stores/update";
 import type { BackupInfo } from "../types/backup";
@@ -24,6 +25,12 @@ const includeCache = ref(true);
 const dataBusy = ref(false);
 const dataMessage = ref("");
 const dataError = ref("");
+const buildId = __BUILD_ID__;
+const pendingConfirm = ref<{
+  message: string;
+  confirmLabel: string;
+  run: () => Promise<void>;
+} | null>(null);
 
 const trashGroups = [
   { kind: "todoList", key: "todoLists", label: "待办列表" },
@@ -107,11 +114,16 @@ async function importData() {
       `- GitHub 追踪列表：${preview.hasWatchlist ? "有" : "无"}、缓存 ${preview.githubCache} 份` +
       (preview.skippedCache ? `（将跳过损坏缓存 ${preview.skippedCache} 份）` : "") +
       `\n\n导入会覆盖当前数据，导入前会自动备份现有数据。确定继续？`;
-    if (!window.confirm(confirmText)) return;
-    const info = await backupApi.importPackage(file);
-    dataMessage.value = `导入完成：便签 ${info.notes}、待办列表 ${info.todos}${info.githubCache ? `、GitHub 缓存 ${info.githubCache}` : ""}${info.skippedCache ? `（跳过损坏缓存 ${info.skippedCache} 份）` : ""}；导入前已自动备份到 ${info.backupPath}`;
-    trash.value = await call<Trash>("trash_list");
-    await refreshBackups();
+    pendingConfirm.value = {
+      message: confirmText,
+      confirmLabel: "导入并覆盖",
+      run: async () => {
+        const info = await backupApi.importPackage(file);
+        dataMessage.value = `导入完成：便签 ${info.notes}、待办列表 ${info.todos}${info.githubCache ? `、GitHub 缓存 ${info.githubCache}` : ""}${info.skippedCache ? `（跳过损坏缓存 ${info.skippedCache} 份）` : ""}；导入前已自动备份到 ${info.backupPath}`;
+        trash.value = await call<Trash>("trash_list");
+        await refreshBackups();
+      },
+    };
   });
 }
 
@@ -172,17 +184,34 @@ async function action(kind: string, id: string, command: string) {
 }
 
 async function permanentlyDelete(kind: string, id: string, title: string) {
-  if (!window.confirm(`永久删除“${title}”？此操作不可撤销。`)) return;
-  await action(kind, id, "trash_delete_permanently");
+  pendingConfirm.value = {
+    message: `永久删除“${title}”？此操作不可撤销。`,
+    confirmLabel: "永久删除",
+    run: async () => {
+      await action(kind, id, "trash_delete_permanently");
+    },
+  };
 }
 
 async function clearTrash() {
   const count = trashCount.value;
   if (!count) return;
-  if (!window.confirm(`清空回收站中的 ${count} 项？此操作不可撤销。`)) return;
-  await call("trash_clear");
-  trash.value = await call<Trash>("trash_list");
-  message.value = "回收站已清空";
+  pendingConfirm.value = {
+    message: `清空回收站中的 ${count} 项？此操作不可撤销。`,
+    confirmLabel: "清空回收站",
+    run: async () => {
+      await call("trash_clear");
+      trash.value = await call<Trash>("trash_list");
+      message.value = "回收站已清空";
+    },
+  };
+}
+
+async function runPendingConfirm() {
+  const pending = pendingConfirm.value;
+  if (!pending) return;
+  pendingConfirm.value = null;
+  await pending.run();
 }
 </script>
 
@@ -194,7 +223,17 @@ async function clearTrash() {
         <p>调整 MayDolist 的外观与后台行为</p>
       </div>
       <span v-if="message" class="settings-message" role="status">{{ message }}</span>
+      <span class="build-id" :title="`Frontend build ${buildId}`">build {{ buildId }}</span>
     </header>
+
+    <ConfirmBar
+      v-if="pendingConfirm"
+      :message="pendingConfirm.message"
+      :confirm-label="pendingConfirm.confirmLabel"
+      danger
+      @confirm="runPendingConfirm"
+      @cancel="pendingConfirm = null"
+    />
 
     <div class="settings-section">
       <h3>常规设置</h3>

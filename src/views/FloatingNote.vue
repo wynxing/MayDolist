@@ -113,7 +113,7 @@ async function toggle() {
     </header>
     <small class="floating-error">{{ loadError }}</small>
   </div>
-  <div v-else-if="note" class="floating" :class="{ collapsed: note.collapsed }">
+  <div v-else-if="note" class="floating" :class="{ collapsed: note.collapsed }" :data-color="note.color || 'blue'">
     <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
     <header>
       <input v-model="note.title" class="floating-title" aria-label="便签标题" />

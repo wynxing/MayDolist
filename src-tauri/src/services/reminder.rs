@@ -33,6 +33,9 @@ pub fn due_reminders(lists: &[TodoList], now: &DateTime<Utc>) -> Vec<DueReminder
                 continue;
             };
             if ts.with_timezone(&Utc) <= *now {
+                if item.last_reminded_at.as_deref() == Some(remind_at.as_str()) {
+                    continue;
+                }
                 out.push(DueReminder {
                     id: item.id.clone(),
                     title: item.title.clone(),
@@ -102,6 +105,7 @@ mod tests {
             remind_at: remind.map(str::to_string),
             repeat: None,
             repeat_until: None,
+            last_reminded_at: None,
         }
     }
 
@@ -155,6 +159,20 @@ mod tests {
         assert_eq!(reminders.len(), 1);
         assert_eq!(reminders[0].id, "due-1");
         assert_eq!(reminders[0].list_title, "工作");
+    }
+
+    #[test]
+    fn skips_reminders_already_persisted() {
+        let mut reminded = item(
+            "due-1",
+            "已提醒",
+            false,
+            Some("2026-08-12"),
+            Some("2026-08-12T09:00:00Z"),
+        );
+        reminded.last_reminded_at = Some("2026-08-12T09:00:00Z".into());
+        let lists = vec![list(vec![reminded])];
+        assert!(due_reminders(&lists, &now()).is_empty());
     }
 
     #[test]

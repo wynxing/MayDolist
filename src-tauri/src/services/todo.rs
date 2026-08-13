@@ -32,6 +32,9 @@ pub struct TodoService {
     /// Serializes inbox lookup/create so concurrent captures can never create
     /// duplicate "收件箱" lists.
     inbox_lock: Mutex<()>,
+    /// Full on-disk lists (including deleted). Invalidated on every write so
+    /// the reminder loop and Focus/palette reads do not rescan JSON every tick.
+    cache: Mutex<Option<Vec<TodoList>>>,
 }
 
 impl TodoService {
@@ -39,11 +42,30 @@ impl TodoService {
         Self {
             storage,
             inbox_lock: Mutex::new(()),
+            cache: Mutex::new(None),
+        }
+    }
+
+    pub fn invalidate_cache(&self) {
+        if let Ok(mut guard) = self.cache.lock() {
+            *guard = None;
         }
     }
 
     pub fn list(&self, include_deleted: bool) -> AppResult<Vec<TodoList>> {
-        let mut lists: Vec<TodoList> = self.storage.list_json("todos")?;
+        let mut lists = {
+            let mut guard = self
+                .cache
+                .lock()
+                .map_err(|_| AppError::Internal("todo cache lock poisoned".into()))?;
+            if let Some(cached) = guard.as_ref() {
+                cached.clone()
+            } else {
+                let loaded: Vec<TodoList> = self.storage.list_json("todos")?;
+                *guard = Some(loaded.clone());
+                loaded
+            }
+        };
         if !include_deleted {
             lists.retain(|list| !list.deleted);
             for list in &mut lists {
@@ -167,6 +189,7 @@ impl TodoService {
             remind_at: schedule.remind_at,
             repeat: schedule.repeat,
             repeat_until: schedule.repeat_until,
+            last_reminded_at: None,
         };
         list.items.push(item.clone());
         list.updated_at = now_rfc3339();
@@ -174,10 +197,10 @@ impl TodoService {
         Ok(item)
     }
 
-    /// Create a Todo for a GitHub issue / PR. The item always lands in the
-    /// capture inbox (reusing the idempotent `ensure_inbox` logic) and keeps
-    /// a validated source reference. The same GitHub item may be converted
-    /// more than once; dedup is intentionally left to a later version.
+    /// Create a Todo for a GitHub issue / PR. The item lands in the capture
+    /// inbox (reusing the idempotent `ensure_inbox` logic) and keeps a
+    /// validated source reference. An incomplete item with the same
+    /// `repo` + `number` is reused instead of creating a duplicate.
     pub fn create_item_from_github(
         &self,
         kind: &str,
@@ -185,9 +208,7 @@ impl TodoService {
         number: u64,
         title: &str,
         url: &str,
-    ) -> AppResult<(TodoList, TodoItem)> {
-        // Validate everything before touching storage so a rejected input can
-        // never create a half-record (including a stray inbox).
+    ) -> AppResult<(TodoList, TodoItem, bool)> {
         validate_title(title)?;
         let source = TodoSource {
             kind: kind.into(),
@@ -196,10 +217,22 @@ impl TodoService {
             url: url.into(),
         };
         source.validate()?;
+        let lists = self.list(false)?;
+        for list in &lists {
+            if let Some(item) = list.items.iter().find(|item| {
+                !item.deleted
+                    && !item.completed
+                    && item.source.as_ref().is_some_and(|existing| {
+                        existing.repo == source.repo && existing.number == source.number
+                    })
+            }) {
+                return Ok((list.clone(), item.clone(), false));
+            }
+        }
         let list = self.ensure_inbox()?;
         let item_title = format!("{} #{} {}", repo.trim(), number, title.trim());
         let item = self.create_item(&list.id, item_title, Some(source), TodoSchedule::default())?;
-        Ok((list, item))
+        Ok((list, item, true))
     }
 
     /// Complete a Todo item. When the item carries a repeat rule, the next
@@ -322,6 +355,25 @@ impl TodoService {
         Err(AppError::NotFound(id.into()))
     }
 
+    /// Record that a reminder for `remind_at` was delivered or suppressed.
+    /// Missing items degrade to a no-op so the scheduler never crashes.
+    pub fn mark_reminded(&self, id: &str, remind_at: &str) -> AppResult<()> {
+        let mut lists = self.list(true)?;
+        for list in &mut lists {
+            if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
+                if item.last_reminded_at.as_deref() == Some(remind_at) {
+                    return Ok(());
+                }
+                item.last_reminded_at = Some(remind_at.into());
+                item.updated_at = now_rfc3339();
+                list.updated_at = now_rfc3339();
+                self.save(list)?;
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     fn get(&self, id: &str) -> AppResult<TodoList> {
         self.list(true)?
             .into_iter()
@@ -329,7 +381,9 @@ impl TodoService {
             .ok_or_else(|| AppError::NotFound(format!("todo list {id}")))
     }
     fn save(&self, list: &TodoList) -> AppResult<()> {
-        self.storage.save_entity("todos", &list.id, list)
+        self.storage.save_entity("todos", &list.id, list)?;
+        self.invalidate_cache();
+        Ok(())
     }
 }
 
@@ -400,6 +454,7 @@ fn build_next_instance(item: &TodoItem, sort_order: i32) -> Option<TodoItem> {
         remind_at: None,
         repeat: Some(rule),
         repeat_until: item.repeat_until.clone(),
+        last_reminded_at: None,
     })
 }
 
@@ -487,7 +542,7 @@ mod tests {
     #[test]
     fn create_item_from_github_lands_in_inbox_with_source() {
         let (dir, service) = temp_service("gh-to-todo");
-        let (list, item) = service
+        let (list, item, created) = service
             .create_item_from_github(
                 "github-pr",
                 "wynxing/MayDolist",
@@ -506,6 +561,7 @@ mod tests {
         assert_eq!(source.repo, "wynxing/MayDolist");
         assert_eq!(source.number, 19);
         assert_eq!(source.url, "https://github.com/wynxing/MayDolist/pull/19");
+        assert!(created);
         // Persisted and reloadable (survives a "restart").
         let stored = service.get(&list.id).unwrap();
         assert_eq!(stored.items.len(), 1);
@@ -515,9 +571,9 @@ mod tests {
     }
 
     #[test]
-    fn create_item_from_github_supports_issues_and_allows_duplicates() {
-        let (dir, service) = temp_service("gh-duplicates");
-        let (_, first) = service
+    fn create_item_from_github_dedups_by_repo_and_number() {
+        let (dir, service) = temp_service("gh-dedup");
+        let (_, first, created_first) = service
             .create_item_from_github(
                 "github-issue",
                 "owner/repo",
@@ -526,10 +582,9 @@ mod tests {
                 "https://github.com/owner/repo/issues/7",
             )
             .unwrap();
+        assert!(created_first);
         assert_eq!(first.source.unwrap().kind, "github-issue");
-        // The same GitHub item may be converted more than once; both items
-        // are kept and both carry the source.
-        let (_, second) = service
+        let (_, second, created_second) = service
             .create_item_from_github(
                 "github-issue",
                 "owner/repo",
@@ -538,10 +593,10 @@ mod tests {
                 "https://github.com/owner/repo/issues/7",
             )
             .unwrap();
-        assert_ne!(first.id, second.id);
+        assert!(!created_second);
+        assert_eq!(first.id, second.id);
         let inbox = service.ensure_inbox().unwrap();
-        assert_eq!(inbox.items.len(), 2);
-        assert!(inbox.items.iter().all(|v| v.source.is_some()));
+        assert_eq!(inbox.items.len(), 1);
         std::fs::remove_dir_all(&dir).ok();
     }
 

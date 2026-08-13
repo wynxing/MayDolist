@@ -181,7 +181,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 项目状态
 
-当前版本：`1.2.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
+当前版本：`1.2.3`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 
