@@ -104,6 +104,16 @@ function todoSourceLabel(source: TodoSource) {
   return `${kind} ${source.repo}#${source.number}`;
 }
 
+function todoGithubSyncLabel(item: FocusTodo) {
+  const sync = item.githubSync;
+  if (!sync) return "";
+  if (sync.syncError) return "同步失败";
+  if (sync.state === "merged") return "已合并";
+  if (sync.state === "closed") return "已关闭";
+  if (sync.state === "unknown") return "状态未知";
+  return "";
+}
+
 function isHttpUrl(url: string) {
   return /^https?:\/\//i.test(url);
 }
@@ -253,6 +263,14 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                     </small>
                     <small v-if="item.source" class="focus-item-source" :title="item.source.url">
                       {{ todoSourceLabel(item.source) }}
+                    </small>
+                    <small
+                      v-if="item.source && todoGithubSyncLabel(item)"
+                      class="focus-item-source focus-item-source-state"
+                      :class="item.githubSync?.state"
+                      :title="item.githubSync?.syncError || 'GitHub 来源状态已同步'"
+                    >
+                      {{ todoGithubSyncLabel(item) }}
                     </small>
                     <small v-if="item.dueDate" class="focus-item-due">
                       截止 {{ formatDue(item.dueDate) }}

@@ -124,6 +124,7 @@ pub fn run() {
             commands::github::github_unpin_item,
             commands::github::github_refresh_repo,
             commands::github::github_refresh_all,
+            commands::github::github_sync_linked_todos,
             commands::github::github_get_snapshot,
             commands::focus::focus_overview,
             commands::update::update_runtime_info,

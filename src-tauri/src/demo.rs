@@ -263,6 +263,7 @@ fn todo(
         created_at: DEMO_LAST_WEEK.into(),
         updated_at: updated_at.into(),
         source,
+        github_sync: None,
         due_date: due_date.map(str::to_string),
         remind_at: None,
         repeat: None,

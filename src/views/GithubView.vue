@@ -232,6 +232,21 @@ function isClosed(state: string) {
   return state !== "open";
 }
 
+function stateLabel(state: string) {
+  return state === "merged" ? "已合并" : state === "closed" ? "已关闭" : state;
+}
+
+const syncSummaryText = computed(() => {
+  const summary = s.lastSyncSummary;
+  if (!summary || !summary.checked) return "";
+  const parts = [`已检查 ${summary.checked} 个关联来源`];
+  if (summary.autoCompleted) parts.push(`${summary.autoCompleted} 项待办已自动完成`);
+  if (summary.reopened) parts.push(`${summary.reopened} 个来源重新打开`);
+  if (summary.failed) parts.push(`${summary.failed} 个同步失败`);
+  if (parts.length === 1) parts.push("状态无变化");
+  return parts.join(" · ");
+});
+
 function convertKey(repoName: string, kind: string, number: number) {
   return `${repoName}:${kind}:${number}`;
 }
@@ -301,6 +316,7 @@ function convertLabel(key: string) {
       <b>{{ s.auth?.message || "检测 GitHub CLI…" }}</b>
       <small>{{ s.auth?.version }}</small>
     </div>
+    <p v-if="syncSummaryText" class="gh-sync-summary" role="status">{{ syncSummaryText }}</p>
     <div class="toolbar">
       <input
         ref="repoInput"
@@ -446,7 +462,12 @@ function convertLabel(key: string) {
           >
             <button class="gh-link" type="button" @click="s.open(pr.url)">
               <span class="gh-title-block">
-                <span class="gh-title">#{{ pr.number }} {{ pr.title }}</span>
+                <span class="gh-title">
+                  #{{ pr.number }} {{ pr.title }}
+                  <span v-if="isClosed(pr.state)" class="gh-state-badge" :class="pr.state">
+                    {{ stateLabel(pr.state) }}
+                  </span>
+                </span>
                 <span class="gh-item-meta-row">
                   <span class="gh-signals">
                     <span
@@ -509,7 +530,12 @@ function convertLabel(key: string) {
           >
             <button class="gh-link" type="button" @click="s.open(issue.url)">
               <span class="gh-title-block">
-                <span class="gh-title">#{{ issue.number }} {{ issue.title }}</span>
+                <span class="gh-title">
+                  #{{ issue.number }} {{ issue.title }}
+                  <span v-if="isClosed(issue.state)" class="gh-state-badge" :class="issue.state">
+                    {{ stateLabel(issue.state) }}
+                  </span>
+                </span>
                 <span class="gh-item-meta-row">
                   <span class="gh-signals">
                     <span

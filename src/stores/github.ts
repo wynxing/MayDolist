@@ -2,7 +2,12 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "../api/github";
-import type { GhAuthStatus, RepoSnapshot, RepoWatch } from "../types/github";
+import type {
+  GhAuthStatus,
+  GithubSyncSummary,
+  RepoSnapshot,
+  RepoWatch,
+} from "../types/github";
 
 let ready = false;
 let timer: number | undefined;
@@ -17,6 +22,7 @@ export const useGithubStore = defineStore("github", () => {
   const watchlist = ref<RepoWatch[]>([]);
   const snapshots = ref<RepoSnapshot[]>([]);
   const error = ref<string | null>(null);
+  const lastSyncSummary = ref<GithubSyncSummary | null>(null);
 
   const replaceSnapshot = (snap: RepoSnapshot) => {
     const idx = snapshots.value.findIndex((v) => v.repo === snap.repo);
@@ -53,12 +59,22 @@ export const useGithubStore = defineStore("github", () => {
     error,
     init,
     refresh: async () => {
-      snapshots.value = await api.refreshAll();
+      const result = await api.refreshAll();
+      snapshots.value = result.snapshots;
+      lastSyncSummary.value = result.sync;
       watchlist.value = await api.watchlist();
+      return result.sync;
     },
     refreshRepo: async (fullName: string) => {
-      const snap = await api.refreshRepo(fullName);
-      replaceSnapshot(snap);
+      const result = await api.refreshRepo(fullName);
+      replaceSnapshot(result.snapshot);
+      lastSyncSummary.value = result.sync;
+      return result.sync;
+    },
+    syncLinkedTodos: async () => {
+      const result = await api.syncLinkedTodos();
+      lastSyncSummary.value = result;
+      return result;
     },
     addWatch: async (v: string) => {
       await api.addWatch(v);
@@ -92,6 +108,7 @@ export const useGithubStore = defineStore("github", () => {
       const snap = await api.snapshot(fullName);
       if (snap) replaceSnapshot(snap);
     },
+    lastSyncSummary,
     open: api.open,
   };
 });

@@ -4,6 +4,7 @@ import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { call } from "../api";
 import * as backupApi from "../api/backup";
 import ConfirmBar from "../components/ConfirmBar.vue";
+import { useGithubStore } from "../stores/github";
 import { useSettingsStore } from "../stores/settings";
 import { useUpdateStore } from "../stores/update";
 import type { BackupInfo } from "../types/backup";
@@ -16,6 +17,7 @@ type Trash = {
 };
 
 const settings = useSettingsStore();
+const github = useGithubStore();
 const updater = useUpdateStore();
 const target = ref("");
 const trash = ref<Trash | null>(null);
@@ -25,6 +27,8 @@ const includeCache = ref(true);
 const dataBusy = ref(false);
 const dataMessage = ref("");
 const dataError = ref("");
+const syncBusy = ref(false);
+const syncMessage = ref("");
 const buildId = __BUILD_ID__;
 const pendingConfirm = ref<{
   message: string;
@@ -152,6 +156,21 @@ async function save() {
     message.value = "设置已保存";
   } catch (err) {
     message.value = `保存失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function syncLinkedTodos() {
+  syncBusy.value = true;
+  syncMessage.value = "";
+  try {
+    const result = await github.syncLinkedTodos();
+    syncMessage.value = result.failed
+      ? `已检查 ${result.checked} 个来源，${result.autoCompleted} 项自动完成，${result.failed} 个同步失败`
+      : `已检查 ${result.checked} 个来源，${result.autoCompleted} 项自动完成`;
+  } catch (err) {
+    syncMessage.value = `同步失败：${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    syncBusy.value = false;
   }
 }
 
@@ -329,6 +348,45 @@ async function runPendingConfirm() {
             class="input settings-control"
           />
         </label>
+
+        <div class="settings-row">
+          <span>
+            GitHub 来源同步
+            <small>刷新已转为 Todo 的 PR / Issue 状态</small>
+          </span>
+          <label class="settings-switch">
+            <input v-model="settings.config.githubSyncEnabled" type="checkbox" />
+            <span>启用来源状态同步</span>
+          </label>
+        </div>
+
+        <div class="settings-row">
+          <span>
+            关闭后自动完成
+            <small>来源关闭或合并后自动完成关联待办，不会自动重新打开</small>
+          </span>
+          <label class="settings-switch">
+            <input
+              v-model="settings.config.githubAutoCompleteTodos"
+              type="checkbox"
+              :disabled="!settings.config.githubSyncEnabled"
+            />
+            <span>自动完成关联待办</span>
+          </label>
+        </div>
+
+        <div class="settings-row">
+          <span>
+            已关联来源
+            <small>只检查已转为 Todo 的 GitHub PR / Issue</small>
+          </span>
+          <span class="settings-control settings-inline-action">
+            <button class="btn ghost compact" type="button" :disabled="syncBusy || !settings.config.githubSyncEnabled" @click="syncLinkedTodos">
+              {{ syncBusy ? "同步中…" : "立即同步" }}
+            </button>
+            <small v-if="syncMessage" class="settings-message" role="status">{{ syncMessage }}</small>
+          </span>
+        </div>
 
         <label class="settings-row">
           <span>

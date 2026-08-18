@@ -39,7 +39,7 @@ MayDolist 是一款面向 Windows 的**本地优先开发者行动收件箱**。
 
 1. 保持 Windows 桌面优先、轻量、可随时收起的体验。
 2. 保持本地优先，不引入云同步、移动端或内嵌 GitHub 登录。
-3. Todo、Note、GitHub 保留各自领域模型；跨模块通过可选来源引用（`TodoSource`）和只读聚合投影（Focus）连接，不互相耦合写路径。
+3. Todo、Note、GitHub 保留各自领域模型；跨模块通过可选来源引用（`TodoSource`）、GitHub 来源同步元数据和只读聚合投影（Focus）连接。
 4. 所有新数据字段必须向后兼容：serde 默认值 + `schemaVersion` / `packageSchemaVersion` 迁移，旧数据按旧逻辑读取。
 5. 每个阶段都必须有可验证的正常、边界和异常路径（见 §10 验收标准与各轮单元测试）。
 
@@ -184,7 +184,7 @@ flowchart LR
 | `services` → `storage` | 领域服务持写锁，经 `storage` 原子写盘 |
 | `services` → `github` | gh CLI 封装与缓存，供 GitHub 服务与快照刷新使用 |
 | `focus` → todo / note / github | 只读投影，并行加载 + 局部失败隔离，不产生写路径 |
-| GitHub → Todo（单向） | 经 `todo_create_from_github` 转换，GitHub 侧缓存、认证与网络状态不变 |
+| GitHub ↔ Todo（弱同步） | 经 `todo_create_from_github` 建立来源引用；刷新时仅查询已关联来源，关闭 / 合并可自动完成未完成 Todo，重新打开不自动重开 |
 | `events` → 所有窗口 | 数据变更广播，保证主面板与悬浮窗一致 |
 
 ## 4. 模块边界
@@ -237,7 +237,7 @@ MayDolist/
 - 实体一文件，文件名 = UUID，扩展名 `.json`。
 - 每个实体文件均含 `schemaVersion` 字段，用于未来格式迁移。
 - `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
-- Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）；旧数据无该字段时按无来源读取，序列化时缺省字段不落盘，向后兼容。
+- Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）以及可选 `githubSync`（`state` / `lastSyncedAt` / 自动完成原因 / 同步错误）；旧数据无这些字段时按无来源或未同步读取，序列化时缺省字段不落盘，向后兼容。
 - Todo 条目可携带可选的 `dueDate`（ISO 日期或 RFC3339 日期时间）、`remindAt`（RFC3339，仅与 `dueDate` 同时有意义）、`repeat`（`daily` / `weekly` / `biweekly` / `monthly`）、`repeatUntil`（日期，停止重复生成）与 `lastRemindedAt`（已送达或安静时段抑制的提醒时间）；旧数据无字段时按空值读取、落盘跳过 `None`，JSON 形状保持向后兼容。非法日期 / 非法组合在 service 层拒绝写入；读取时降级为无日期，不崩溃。
 - `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
 - 仓库快照的每个条目含可选信号字段（`assignees` / `reviewers` / `headSha` / `checksState` / `signals`），快照级 `signalsComputedAt` 记录信号计算时间；旧快照缺字段时按空值读取，刷新成功后自动补全（向后兼容，不需要迁移）。
@@ -261,6 +261,7 @@ MayDolist/
 - `quickCaptureHotkey` / `quickCaptureEnabled`：快速收集窗的全局快捷键与启用开关，默认 `Ctrl+Alt+Space` / `true`；与主面板快捷键冲突或格式非法时在保存设置时报错，不写入。
 - `commandPaletteHotkey` / `commandPaletteEnabled`：全局命令面板的快捷键与启用开关，默认 `Ctrl+K` / `true`；与主面板或快速收集快捷键冲突或格式非法时在保存设置时报错，不写入。
 - `quietHours`（可选）：提醒安静时段，`start` / `end` 均为本地 `HH:MM`（24 小时制），支持跨午夜（如 `22:00`–`07:00`）；该时段内到期提醒不弹通知，仅保留托盘逾期徽标。旧配置无该字段时按 `null`（不启用）读取；非法值在加载时被清理回 `null`。
+- `githubSyncEnabled` / `githubAutoCompleteTodos`：已关联 GitHub 来源同步与关闭 / 合并后自动完成开关，默认均为 `true`；关闭自动完成时仍记录来源状态，但不改变 Todo 完成状态。
 
 相关规则：
 
@@ -312,6 +313,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 创建待办、勾选完成（划线展示）、软删除，支持多列表组织。
 - 软删除数据保留在文件内，便于未来恢复；列表展示时过滤已删除项。
 - 条目可带来源引用（如 GitHub PR / Issue）：Todo 视图与 Focus 视图显示来源徽标（仓库 #编号），并提供「打开来源」操作；来源 URL 仅允许 http / https，由 Rust 层校验，打开统一走系统浏览器。
+- GitHub 来源同步：手动刷新、应用启动刷新和后台定时刷新后，只检查已转为 Todo 的来源；Issue / PR 关闭或 PR 合并时，默认自动完成仍未完成的关联 Todo，并保存 `githubSync` 状态与原因；重新打开只显示提示，不自动重开本地 Todo；网络、认证、404 或限流失败时保留原完成状态，不猜测为关闭。
 - 来源字段必须通过 Rust command / service 传递并持久化，前端不直接写文件。
 - 条目可设置 / 清除到期日（`dueDate`）、提醒时间（`remindAt`）与周期规则（`repeat` / `repeatUntil`）。Todo 视图行内提供日期、日期时间与重复规则控件；所有写入经 `todo_update_item` 复用同一 command / service，前端不直接写文件。
 - 完成带 `repeat` 的任务时，service 在同一原子写中生成下一次实例（标题、来源、周期规则一致，`dueDate` 推进到下一个未来发生日），`repeatUntil` 到期后不再生成；重复生成逻辑集中在 Rust service 层并有单测，用户可以随时把周期规则改为「不重复」。
@@ -334,6 +336,7 @@ maydolist-export-YYYYMMDD-HHMMSS.zip
 - 刷新失败、认证失败、网络失败或 API 缺字段时降级：保留上次本地快照继续展示（缺信号字段的旧快照标注「旧缓存」，刷新后自动补全）。
 - 点击条目在系统浏览器打开对应页面。
 - PR / Issue 行提供「转为 Todo」：调用 Todo 领域命令（`todo_create_from_github`），默认标题为「仓库 #编号 标题」，条目默认进入收件箱（复用 `ensure_inbox` 幂等逻辑），写入带来源的 Todo；同一 `repo` + `number` 的未完成条目会复用已有 Todo，不再重复创建。该操作只触碰 Todo 域，不改变 GitHub 缓存、认证与网络状态。
+- 刷新结果返回关联来源同步摘要（检查数、自动完成数、重新打开数、失败数）；设置页可关闭同步、关闭自动完成或立即同步关联来源。
 
 ### 6.6 Focus 今日视图
 

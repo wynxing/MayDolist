@@ -13,6 +13,10 @@ export interface AppConfig {
   githubRefreshIntervalMinutes: number;
   /** Days after which an open GitHub item is flagged "长期未更新"; 0 disables. */
   githubStaleDays: number;
+  /** Sync linked GitHub sources into Todo metadata. */
+  githubSyncEnabled: boolean;
+  /** Automatically complete linked Todos when their source closes or merges. */
+  githubAutoCompleteTodos: boolean;
   /** Optional quiet window for due reminders; `null` keeps reminders always on. */
   quietHours: QuietHours | null;
   autostart: boolean;

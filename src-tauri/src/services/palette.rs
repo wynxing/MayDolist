@@ -379,6 +379,7 @@ mod tests {
             created_at: "2026-08-01T00:00:00Z".into(),
             updated_at: updated_at.into(),
             source,
+            github_sync: None,
             due_date: None,
             remind_at: None,
             repeat: None,

@@ -6,7 +6,9 @@ use chrono::Local;
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
 use crate::models::todo::{next_repeat_due, parse_due_date, validate_due_date};
-use crate::models::{RepeatRule, TodoItem, TodoList, TodoSource};
+use crate::models::{
+    GithubSyncMetadata, GithubSyncState, RepeatRule, TodoItem, TodoList, TodoSource,
+};
 use crate::storage::Storage;
 use std::sync::Mutex;
 
@@ -185,6 +187,7 @@ impl TodoService {
             created_at: now.clone(),
             updated_at: now,
             source,
+            github_sync: None,
             due_date: schedule.due_date,
             remind_at: schedule.remind_at,
             repeat: schedule.repeat,
@@ -258,6 +261,13 @@ impl TodoService {
                 }
                 if let Some(value) = completed {
                     item.completed = value;
+                    if !value {
+                        if let Some(sync) = item.github_sync.as_mut() {
+                            if sync.auto_completed_at.is_some() {
+                                sync.auto_completion_undone_at = Some(now_rfc3339());
+                            }
+                        }
+                    }
                 }
                 if let Some(value) = deleted {
                     item.deleted = value;
@@ -287,6 +297,123 @@ impl TodoService {
                 list.updated_at = now_rfc3339();
                 self.save(list)?;
                 return Ok(result);
+            }
+        }
+        Err(AppError::NotFound(format!("todo item {id}")))
+    }
+
+    /// Apply a successfully fetched GitHub source state to a Todo. This path
+    /// intentionally does not use `update_item`: an automatic completion must
+    /// never create a repeat instance or otherwise alter local scheduling.
+    pub fn sync_github_item(
+        &self,
+        id: &str,
+        state: GithubSyncState,
+        synced_at: &str,
+        auto_complete: bool,
+    ) -> AppResult<(TodoItem, bool, bool)> {
+        let mut lists = self.list(true)?;
+        for list in &mut lists {
+            if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
+                if item.source.is_none() {
+                    return Err(AppError::InvalidInput(
+                        "todo item has no GitHub source".into(),
+                    ));
+                }
+                let previous = item.github_sync.clone();
+                let mut metadata = previous.clone().unwrap_or(GithubSyncMetadata {
+                    state: GithubSyncState::Unknown,
+                    last_synced_at: None,
+                    auto_completed_at: None,
+                    auto_completion_reason: None,
+                    auto_completion_undone_at: None,
+                    sync_error: None,
+                });
+                let previous_state = metadata.state;
+                let previous_error = metadata.sync_error.clone();
+                let mut auto_completed = false;
+                metadata.state = state;
+                metadata.last_synced_at = Some(synced_at.into());
+                metadata.sync_error = None;
+                if state == GithubSyncState::Open {
+                    metadata.auto_completion_undone_at = None;
+                }
+                if auto_complete
+                    && !item.completed
+                    && matches!(state, GithubSyncState::Closed | GithubSyncState::Merged)
+                    && metadata.auto_completion_undone_at.is_none()
+                {
+                    item.completed = true;
+                    metadata.auto_completed_at = Some(synced_at.into());
+                    metadata.auto_completion_undone_at = None;
+                    metadata.auto_completion_reason = Some(
+                        match state {
+                            GithubSyncState::Merged => "merged",
+                            _ => "closed",
+                        }
+                        .into(),
+                    );
+                    auto_completed = true;
+                }
+                let changed = previous.is_none()
+                    || previous_state != state
+                    || previous_error.is_some()
+                    || auto_completed;
+                item.github_sync = Some(metadata);
+                if changed {
+                    item.updated_at = synced_at.into();
+                    list.updated_at = now_rfc3339();
+                    let result = item.clone();
+                    self.save(list)?;
+                    return Ok((result, true, auto_completed));
+                }
+                // Keep the latest successful timestamp in memory and on disk,
+                // but do not make the UI refresh on every periodic poll.
+                let result = item.clone();
+                self.save(list)?;
+                return Ok((result, false, false));
+            }
+        }
+        Err(AppError::NotFound(format!("todo item {id}")))
+    }
+
+    /// Record a failed source lookup without guessing that the source closed.
+    /// Existing known state is retained; a source never checked successfully
+    /// is represented as `unknown`.
+    pub fn record_github_sync_error(
+        &self,
+        id: &str,
+        error: &str,
+        recorded_at: &str,
+    ) -> AppResult<(TodoItem, bool)> {
+        let mut lists = self.list(true)?;
+        for list in &mut lists {
+            if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
+                if item.source.is_none() {
+                    return Err(AppError::InvalidInput(
+                        "todo item has no GitHub source".into(),
+                    ));
+                }
+                let previous = item.github_sync.clone();
+                let mut metadata = previous.clone().unwrap_or(GithubSyncMetadata {
+                    state: GithubSyncState::Unknown,
+                    last_synced_at: None,
+                    auto_completed_at: None,
+                    auto_completion_reason: None,
+                    auto_completion_undone_at: None,
+                    sync_error: None,
+                });
+                let changed = previous.is_none() || metadata.sync_error.as_deref() != Some(error);
+                metadata.sync_error = Some(error.into());
+                item.github_sync = Some(metadata);
+                if changed {
+                    item.updated_at = recorded_at.into();
+                    list.updated_at = now_rfc3339();
+                    let result = item.clone();
+                    self.save(list)?;
+                    return Ok((result, true));
+                }
+                return Ok((item.clone(), false));
             }
         }
         Err(AppError::NotFound(format!("todo item {id}")))
@@ -450,6 +577,7 @@ fn build_next_instance(item: &TodoItem, sort_order: i32) -> Option<TodoItem> {
         created_at: now.clone(),
         updated_at: now,
         source: item.source.clone(),
+        github_sync: item.github_sync.clone(),
         due_date: Some(next_due.format("%Y-%m-%d").to_string()),
         remind_at: None,
         repeat: Some(rule),
@@ -597,6 +725,191 @@ mod tests {
         assert_eq!(first.id, second.id);
         let inbox = service.ensure_inbox().unwrap();
         assert_eq!(inbox.items.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn github_closed_source_auto_completes_without_spawning_repeat() {
+        let (dir, service) = temp_service("gh-sync-close");
+        let inbox = service.ensure_inbox().unwrap();
+        let item = service
+            .create_item(
+                &inbox.id,
+                "跟进 PR".into(),
+                Some(TodoSource {
+                    kind: "github-pr".into(),
+                    repo: "owner/repo".into(),
+                    number: 8,
+                    url: "https://github.com/owner/repo/pull/8".into(),
+                }),
+                TodoSchedule {
+                    due_date: Some("2026-08-15".into()),
+                    remind_at: None,
+                    repeat: Some(RepeatRule::Weekly),
+                    repeat_until: None,
+                },
+            )
+            .unwrap();
+        let (updated, changed, auto_completed) = service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Closed,
+                "2026-08-17T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert!(changed);
+        assert!(auto_completed);
+        assert!(updated.completed);
+        assert_eq!(
+            updated.github_sync.as_ref().unwrap().state,
+            GithubSyncState::Closed
+        );
+        assert_eq!(
+            updated
+                .github_sync
+                .as_ref()
+                .unwrap()
+                .auto_completion_reason
+                .as_deref(),
+            Some("closed")
+        );
+        let stored = service.get(&inbox.id).unwrap();
+        assert_eq!(
+            stored.items.len(),
+            1,
+            "sync completion must not create a repeat item"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn github_merged_source_auto_completes_and_reopen_does_not_reopen_todo() {
+        let (dir, service) = temp_service("gh-sync-merge-reopen");
+        let (_, item, _) = service
+            .create_item_from_github(
+                "github-pr",
+                "owner/repo",
+                9,
+                "合并后跟进",
+                "https://github.com/owner/repo/pull/9",
+            )
+            .unwrap();
+        let (closed, _, auto_completed) = service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Merged,
+                "2026-08-17T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert!(auto_completed);
+        assert!(closed.completed);
+        let (reopened, _, _) = service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Open,
+                "2026-08-18T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert!(
+            reopened.completed,
+            "reopening GitHub must not reopen a local Todo"
+        );
+        assert_eq!(
+            reopened.github_sync.as_ref().unwrap().state,
+            GithubSyncState::Open
+        );
+        assert!(reopened
+            .github_sync
+            .as_ref()
+            .unwrap()
+            .auto_completed_at
+            .is_some());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn github_sync_error_never_auto_completes_or_guesses_closed() {
+        let (dir, service) = temp_service("gh-sync-error");
+        let (_, item, _) = service
+            .create_item_from_github(
+                "github-issue",
+                "owner/repo",
+                10,
+                "网络错误时保持待办",
+                "https://github.com/owner/repo/issues/10",
+            )
+            .unwrap();
+        let (updated, changed) = service
+            .record_github_sync_error(&item.id, "GitHub API unavailable", "2026-08-17T10:00:00Z")
+            .unwrap();
+        assert!(changed);
+        assert!(!updated.completed);
+        let sync = updated.github_sync.unwrap();
+        assert_eq!(sync.state, GithubSyncState::Unknown);
+        assert_eq!(sync.sync_error.as_deref(), Some("GitHub API unavailable"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn manually_undoing_auto_completion_is_respected_until_source_reopens() {
+        let (dir, service) = temp_service("gh-sync-undo");
+        let (_, item, _) = service
+            .create_item_from_github(
+                "github-issue",
+                "owner/repo",
+                11,
+                "允许手动恢复",
+                "https://github.com/owner/repo/issues/11",
+            )
+            .unwrap();
+        service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Closed,
+                "2026-08-17T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        service
+            .update_item(&item.id, None, Some(false), None, None)
+            .unwrap();
+        let (undone, _, auto_completed_again) = service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Closed,
+                "2026-08-17T11:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert!(!auto_completed_again);
+        assert!(!undone.completed);
+        assert!(undone
+            .github_sync
+            .as_ref()
+            .unwrap()
+            .auto_completion_undone_at
+            .is_some());
+        service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Open,
+                "2026-08-18T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        let (closed_again, _, auto_completed_again) = service
+            .sync_github_item(
+                &item.id,
+                GithubSyncState::Closed,
+                "2026-08-19T10:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert!(auto_completed_again);
+        assert!(closed_again.completed);
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ActionSignal, RepeatRule, TodoSource};
+use super::{ActionSignal, GithubSyncMetadata, RepeatRule, TodoSource};
 
 /// Per-section load state of the Focus read-only projection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,6 +24,8 @@ pub struct FocusTodo {
     /// Optional external source (GitHub PR / issue) for the "open source"
     /// action in the Focus view; `None` for plain todos.
     pub source: Option<TodoSource>,
+    /// GitHub source state when this Todo has been synchronized.
+    pub github_sync: Option<GithubSyncMetadata>,
     /// Optional due date (`YYYY-MM-DD` or RFC3339); used for grouping.
     pub due_date: Option<String>,
     /// Optional reminder time (RFC3339) carried over for display.

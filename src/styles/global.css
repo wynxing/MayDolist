@@ -2175,6 +2175,37 @@ textarea.input {
   font-size: 11px;
 }
 
+.todo-source-state {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(143, 153, 168, 0.16);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.todo-source-state.merged {
+  background: rgba(46, 139, 87, 0.16);
+  color: var(--ok, #2e8b57);
+}
+
+.todo-source-state.closed {
+  background: rgba(143, 153, 168, 0.18);
+  color: var(--muted);
+}
+
+.todo-source-state.reopened {
+  background: rgba(218, 155, 45, 0.16);
+  color: #c88b1d;
+}
+
+.todo-source-state.error {
+  background: rgba(220, 68, 68, 0.14);
+  color: #d24a4a;
+}
+
 .gh-convert {
   flex: none;
   font-size: 12px;
@@ -2207,6 +2238,32 @@ textarea.input {
   align-self: center;
   margin: 0;
   font-size: 11px;
+}
+
+.gh-sync-summary {
+  margin: -4px 0 10px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.gh-state-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(143, 153, 168, 0.16);
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.gh-state-badge.merged {
+  color: var(--ok, #2e8b57);
+  background: rgba(46, 139, 87, 0.16);
 }
 
 /* #29: Focus 到期分组与逾期高亮 */
@@ -2260,6 +2317,19 @@ textarea.input {
 
 .focus-item-repeat {
   color: var(--accent);
+}
+
+.focus-item-source-state {
+  color: var(--muted);
+}
+
+.focus-item-source-state.merged {
+  color: var(--ok, #2e8b57);
+}
+
+.focus-item-source-state.closed,
+.focus-item-source-state.unknown {
+  color: var(--muted);
 }
 
 .focus-flash {

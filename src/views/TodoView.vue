@@ -348,6 +348,43 @@ function sourceLabel(source: TodoSource) {
   return `${kind} ${source.repo}#${source.number}`;
 }
 
+function githubSyncLabel(item: TodoItem) {
+  const sync = item.githubSync;
+  if (!sync) return "";
+  if (sync.syncError) return "同步失败";
+  if (sync.state === "merged") return sync.autoCompletionUndoneAt ? "已撤销自动完成" : "已合并";
+  if (sync.state === "closed") return sync.autoCompletionUndoneAt ? "已撤销自动完成" : "已关闭";
+  if (sync.state === "unknown") return "状态未知";
+  if (item.completed && sync.autoCompletedAt) return "来源已重新打开";
+  return "";
+}
+
+function githubSyncClass(item: TodoItem) {
+  const sync = item.githubSync;
+  if (!sync) return "";
+  if (sync.syncError || sync.state === "unknown") return "error";
+  if (sync.state === "merged") return sync.autoCompletionUndoneAt ? "reopened" : "merged";
+  if (sync.state === "closed") return sync.autoCompletionUndoneAt ? "reopened" : "closed";
+  if (item.completed && sync.autoCompletedAt) return "reopened";
+  return "";
+}
+
+function githubSyncTitle(item: TodoItem) {
+  const sync = item.githubSync;
+  if (!sync) return "";
+  if (sync.syncError) return `GitHub 来源同步失败：${sync.syncError}`;
+  if (sync.state === "merged") {
+    if (sync.autoCompletionUndoneAt) return "已撤销自动完成，来源仍处于已合并状态";
+    return sync.autoCompletedAt ? "来源已合并，待办已自动完成" : "来源已合并";
+  }
+  if (sync.state === "closed") {
+    if (sync.autoCompletionUndoneAt) return "已撤销自动完成，来源仍处于已关闭状态";
+    return sync.autoCompletedAt ? "来源已关闭，待办已自动完成" : "来源已关闭";
+  }
+  if (item.completed && sync.autoCompletedAt) return "来源已重新打开，待办保持已完成";
+  return "GitHub 来源已同步";
+}
+
 function isHttpUrl(url: string) {
   return /^https?:\/\//i.test(url);
 }
@@ -828,6 +865,14 @@ function onItemDragEnd() {
                     {{ sourceLabel(item.source) }}
                   </span>
                   <span
+                    v-if="item.source && githubSyncLabel(item)"
+                    class="todo-source-state"
+                    :class="githubSyncClass(item)"
+                    :title="githubSyncTitle(item)"
+                  >
+                    {{ githubSyncLabel(item) }}
+                  </span>
+                  <span
                     v-for="summary in scheduleSummaries(item)"
                     :key="summary"
                     class="todo-schedule-summary"
@@ -973,6 +1018,14 @@ function onItemDragEnd() {
                   >
                     <span v-if="item.source" class="todo-source" :title="item.source.url">
                       {{ sourceLabel(item.source) }}
+                    </span>
+                    <span
+                      v-if="item.source && githubSyncLabel(item)"
+                      class="todo-source-state"
+                      :class="githubSyncClass(item)"
+                      :title="githubSyncTitle(item)"
+                    >
+                      {{ githubSyncLabel(item) }}
                     </span>
                     <span
                       v-for="summary in scheduleSummaries(item)"

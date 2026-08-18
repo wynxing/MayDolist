@@ -2,9 +2,51 @@ use crate::{
     error::AppResult,
     events::emit_entity_changed,
     models::{GhAuthStatus, RepoSnapshot, RepoWatch},
+    services::github::GithubSyncSummary,
     AppState,
 };
+use serde::Serialize;
 use tauri::{AppHandle, State};
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRefreshResult {
+    pub snapshot: RepoSnapshot,
+    pub sync: GithubSyncSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRefreshAllResult {
+    pub snapshots: Vec<RepoSnapshot>,
+    pub sync: GithubSyncSummary,
+}
+
+fn emit_sync_events(app: &AppHandle, summary: &GithubSyncSummary) {
+    let auto_completed = summary
+        .auto_completed_item_ids
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
+    for id in &summary.changed_item_ids {
+        let operation = if auto_completed.contains(id) {
+            "auto-completed"
+        } else {
+            "source-state-changed"
+        };
+        emit_entity_changed(app, "todoItem", id, operation).ok();
+    }
+    emit_entity_changed(
+        app,
+        "github",
+        "*",
+        if summary.failed > 0 {
+            "sync-failed"
+        } else {
+            "status-synced"
+        },
+    )
+    .ok();
+}
 
 #[tauri::command]
 pub async fn github_status(state: State<'_, AppState>) -> crate::error::AppResult<GhAuthStatus> {
@@ -126,27 +168,74 @@ pub async fn github_refresh_repo(
     state: State<'_, AppState>,
     app: AppHandle,
     full_name: String,
-) -> AppResult<RepoSnapshot> {
+) -> AppResult<GithubRefreshResult> {
     let github = state.services.github.clone();
+    let todo = state.services.todo.clone();
+    let config = state.storage.load_config()?;
+    let sync_enabled = config.github_sync_enabled;
+    let auto_complete = config.github_auto_complete_todos;
     let repo = full_name.clone();
-    let v = tauri::async_runtime::spawn_blocking(move || github.refresh(&repo))
-        .await
-        .map_err(|e| crate::error::AppError::Internal(e.to_string()))??;
+    let (v, sync) = tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = github.refresh(&repo)?;
+        let sync = if sync_enabled {
+            github.sync_linked_todos(&todo, auto_complete)
+        } else {
+            GithubSyncSummary::default()
+        };
+        Ok::<_, crate::error::AppError>((snapshot, sync))
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Internal(e.to_string()))??;
     emit_entity_changed(&app, "github", &full_name, "refreshed")?;
-    Ok(v)
+    emit_sync_events(&app, &sync);
+    Ok(GithubRefreshResult { snapshot: v, sync })
 }
 
 #[tauri::command]
 pub async fn github_refresh_all(
     state: State<'_, AppState>,
     app: AppHandle,
-) -> AppResult<Vec<RepoSnapshot>> {
+) -> AppResult<GithubRefreshAllResult> {
     let github = state.services.github.clone();
-    let v = tauri::async_runtime::spawn_blocking(move || github.refresh_all())
-        .await
-        .map_err(|e| crate::error::AppError::Internal(e.to_string()))??;
+    let todo = state.services.todo.clone();
+    let config = state.storage.load_config()?;
+    let sync_enabled = config.github_sync_enabled;
+    let auto_complete = config.github_auto_complete_todos;
+    let (v, sync) = tauri::async_runtime::spawn_blocking(move || {
+        let snapshots = github.refresh_all()?;
+        let sync = if sync_enabled {
+            github.sync_linked_todos(&todo, auto_complete)
+        } else {
+            GithubSyncSummary::default()
+        };
+        Ok::<_, crate::error::AppError>((snapshots, sync))
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Internal(e.to_string()))??;
     emit_entity_changed(&app, "github", "*", "refreshed")?;
-    Ok(v)
+    emit_sync_events(&app, &sync);
+    Ok(GithubRefreshAllResult { snapshots: v, sync })
+}
+
+#[tauri::command]
+pub async fn github_sync_linked_todos(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> AppResult<GithubSyncSummary> {
+    let config = state.storage.load_config()?;
+    if !config.github_sync_enabled {
+        return Ok(GithubSyncSummary::default());
+    }
+    let github = state.services.github.clone();
+    let todo = state.services.todo.clone();
+    let auto_complete = config.github_auto_complete_todos;
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        github.sync_linked_todos(&todo, auto_complete)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Internal(e.to_string()))?;
+    emit_sync_events(&app, &summary);
+    Ok(summary)
 }
 
 #[tauri::command]

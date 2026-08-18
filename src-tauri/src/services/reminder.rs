@@ -101,6 +101,7 @@ mod tests {
             created_at: "2026-08-01T00:00:00Z".into(),
             updated_at: "2026-08-01T00:00:00Z".into(),
             source: None,
+            github_sync: None,
             due_date: due.map(str::to_string),
             remind_at: remind.map(str::to_string),
             repeat: None,
