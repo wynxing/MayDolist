@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use crate::error::{AppError, AppResult};
 use crate::events::now_rfc3339;
 use crate::models::{
-    refresh_stale, ActionSignal, GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest, RepoSnapshot,
-    RepoWatch,
+    refresh_stale, ActionSignal, GhAuthStatus, GhIgnoredItem, GhIssue, GhPullRequest,
+    GithubSyncMetadata, GithubSyncState, RepoSnapshot, RepoWatch, TodoSource,
 };
+use crate::services::todo::TodoService;
 use crate::storage::Storage;
 
 const FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved", "all-prs"];
@@ -17,6 +18,33 @@ const DEFAULT_FILTERS: &[&str] = &["mine", "mentioned", "assigned", "involved"];
 const SIGNAL_FILTERS: &[&str] = &["needsAction", "needsReview", "ciFailed", "stale"];
 /// Fallback used when `config.json` cannot be read for the stale threshold.
 const DEFAULT_STALE_DAYS: u32 = 14;
+
+type LinkedTodo = (String, Option<GithubSyncMetadata>);
+type LinkedSourceGroup = (TodoSource, Vec<LinkedTodo>);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSyncFailure {
+    pub repo: String,
+    pub kind: String,
+    pub number: u64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSyncSummary {
+    pub checked: usize,
+    pub changed: usize,
+    pub auto_completed: usize,
+    pub reopened: usize,
+    pub failed: usize,
+    pub failures: Vec<GithubSyncFailure>,
+    #[serde(skip_serializing)]
+    pub changed_item_ids: Vec<String>,
+    #[serde(skip_serializing)]
+    pub auto_completed_item_ids: Vec<String>,
+}
 
 pub struct GithubService {
     storage: Arc<Storage>,
@@ -346,6 +374,138 @@ impl GithubService {
             }
         }
         Ok(out)
+    }
+
+    /// Synchronize only GitHub sources already attached to local Todos. The
+    /// caller decides whether the user enabled this feature and whether
+    /// closed/merged sources may auto-complete Todos.
+    pub fn sync_linked_todos(&self, todo: &TodoService, auto_complete: bool) -> GithubSyncSummary {
+        let mut summary = GithubSyncSummary::default();
+        if self.demo_mode {
+            return summary;
+        }
+        let lists = match todo.list(false) {
+            Ok(lists) => lists,
+            Err(err) => {
+                summary.failed = 1;
+                summary.failures.push(GithubSyncFailure {
+                    repo: "*".into(),
+                    kind: "todo".into(),
+                    number: 0,
+                    message: err.to_string(),
+                });
+                return summary;
+            }
+        };
+        let mut sources: HashMap<String, LinkedSourceGroup> = HashMap::new();
+        for list in lists {
+            for item in list.items {
+                let Some(source) = item.source else { continue };
+                let key = format!("{}:{}:{}", source.kind, source.repo, source.number);
+                sources
+                    .entry(key)
+                    .or_insert_with(|| (source, Vec::new()))
+                    .1
+                    .push((item.id, item.github_sync));
+            }
+        }
+        if sources.is_empty() {
+            return summary;
+        }
+        summary.checked = sources.len();
+
+        let auth_error = if self.status().state == "authenticated" {
+            None
+        } else {
+            Some("GitHub CLI 未登录或当前不可用".to_string())
+        };
+        for (_key, (source, items)) in sources {
+            let now = now_rfc3339();
+            let status = match &auth_error {
+                Some(error) => Err(AppError::Github(error.clone())),
+                None => self.fetch_linked_source_status(&source),
+            };
+            match status {
+                Ok(state) => {
+                    for (id, previous) in items {
+                        let reopened = previous.as_ref().is_some_and(|metadata| {
+                            matches!(
+                                metadata.state,
+                                GithubSyncState::Closed | GithubSyncState::Merged
+                            ) && metadata.auto_completed_at.is_some()
+                                && state == GithubSyncState::Open
+                        });
+                        match todo.sync_github_item(&id, state, &now, auto_complete) {
+                            Ok((_, changed, auto_completed)) => {
+                                if changed {
+                                    summary.changed += 1;
+                                    summary.changed_item_ids.push(id.clone());
+                                }
+                                if auto_completed {
+                                    summary.auto_completed += 1;
+                                    summary.auto_completed_item_ids.push(id.clone());
+                                }
+                                if reopened {
+                                    summary.reopened += 1;
+                                }
+                            }
+                            Err(err) => {
+                                summary.failed += 1;
+                                summary.failures.push(GithubSyncFailure {
+                                    repo: source.repo.clone(),
+                                    kind: source.kind.clone(),
+                                    number: source.number,
+                                    message: err.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    summary.failed += 1;
+                    summary.failures.push(GithubSyncFailure {
+                        repo: source.repo.clone(),
+                        kind: source.kind.clone(),
+                        number: source.number,
+                        message: err.to_string(),
+                    });
+                    for (id, _) in items {
+                        if let Ok((_, changed)) =
+                            todo.record_github_sync_error(&id, &err.to_string(), &now)
+                        {
+                            if changed {
+                                summary.changed += 1;
+                                summary.changed_item_ids.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        summary
+    }
+
+    fn fetch_linked_source_status(&self, source: &TodoSource) -> AppResult<GithubSyncState> {
+        let repo = normalize_repo(&source.repo)?;
+        let path = if source.kind == "github-pr" {
+            format!("repos/{repo}/pulls/{}", source.number)
+        } else if source.kind == "github-issue" {
+            format!("repos/{repo}/issues/{}", source.number)
+        } else {
+            return Err(AppError::InvalidInput(format!(
+                "unsupported GitHub source type: {}",
+                source.kind
+            )));
+        };
+        let response: LinkedSourceResponse = gh_json(&["api", &path])?;
+        if source.kind == "github-pr" && (response.merged || response.merged_at.is_some()) {
+            return Ok(GithubSyncState::Merged);
+        }
+        if response.state.eq_ignore_ascii_case("open") {
+            Ok(GithubSyncState::Open)
+        } else {
+            Ok(GithubSyncState::Closed)
+        }
     }
 
     fn refresh_inner(&self, repo: &str) -> AppResult<RepoSnapshot> {
@@ -865,6 +1025,15 @@ struct PullDetail {
     #[serde(default)]
     requested_reviewers: Vec<GhUser>,
     head: PullHead,
+}
+
+#[derive(Deserialize)]
+struct LinkedSourceResponse {
+    state: String,
+    #[serde(default)]
+    merged: bool,
+    #[serde(default)]
+    merged_at: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]

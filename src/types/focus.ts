@@ -1,5 +1,5 @@
 import type { ActionSignal } from "./github";
-import type { RepeatRule, TodoSource } from "./todo";
+import type { GithubSyncMetadata, RepeatRule, TodoSource } from "./todo";
 
 /** Mirrors Rust `models::focus::FocusSectionState`. */
 export type FocusSectionState = "ready" | "error";
@@ -14,6 +14,7 @@ export interface FocusTodo {
   updatedAt: string;
   /** Optional GitHub source; `null` for plain todos. */
   source: TodoSource | null;
+  githubSync: GithubSyncMetadata | null;
   /** Optional due date (`YYYY-MM-DD` or RFC3339); used for grouping. */
   dueDate: string | null;
   /** Optional reminder time (RFC3339), carried for display. */

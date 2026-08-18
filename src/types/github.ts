@@ -67,3 +67,29 @@ export interface RepoSnapshot {
   /** When the persisted signals were computed; null for pre-signal caches. */
   signalsComputedAt: string | null;
 }
+
+export interface GithubSyncFailure {
+  repo: string;
+  kind: string;
+  number: number;
+  message: string;
+}
+
+export interface GithubSyncSummary {
+  checked: number;
+  changed: number;
+  autoCompleted: number;
+  reopened: number;
+  failed: number;
+  failures: GithubSyncFailure[];
+}
+
+export interface GithubRefreshResult {
+  snapshot: RepoSnapshot;
+  sync: GithubSyncSummary;
+}
+
+export interface GithubRefreshAllResult {
+  snapshots: RepoSnapshot[];
+  sync: GithubSyncSummary;
+}

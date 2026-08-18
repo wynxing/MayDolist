@@ -53,7 +53,7 @@ Todo 支持多个清单、完成、排序、软删除和 GitHub 来源关联；�
 
 ### GitHub 追踪
 
-按仓库组织 PR 和 Issue，支持「我的」「被提及」「被分配」「参与」等筛选，并显示需要处理、需要 Review、CI 失败、长期未更新和 Draft 等行动信号。条目可以直接打开 GitHub 原文，或一键转成带来源的 Todo。
+按仓库组织 PR 和 Issue，支持「我的」「被提及」「被分配」「参与」等筛选，并显示需要处理、需要 Review、CI 失败、长期未更新和 Draft 等行动信号。条目可以直接打开 GitHub 原文，或一键转成带来源的 Todo。刷新后会同步已关联来源：PR 合并或 Issue/PR 关闭时默认自动完成对应 Todo；来源重新打开时不会自动重开本地待办，网络失败也不会误完成。
 
 ![MayDolist GitHub 追踪](docs/screenshots/github-demo.png)
 

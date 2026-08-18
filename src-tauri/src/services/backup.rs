@@ -819,7 +819,10 @@ mod tests {
         let config = target_storage.load_config().unwrap();
         assert_eq!(config.theme, "dark");
         assert_eq!(config.data_dir, target_dir.display().to_string());
-        assert_eq!(config.schema_version, 2);
+        assert_eq!(
+            config.schema_version,
+            crate::models::config::CONFIG_SCHEMA_VERSION
+        );
         fs::remove_dir_all(&source_dir).ok();
         fs::remove_dir_all(&target_dir).ok();
     }

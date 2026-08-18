@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 
 /// Allowed range for glass background opacity (40%..=100%).
 pub const GLASS_OPACITY_MIN: f64 = 0.4;
@@ -34,6 +34,14 @@ fn default_command_palette_enabled() -> bool {
 
 fn default_github_stale_days() -> u32 {
     14
+}
+
+fn default_github_sync_enabled() -> bool {
+    true
+}
+
+fn default_github_auto_complete_todos() -> bool {
+    true
 }
 
 fn deserialize_string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -131,6 +139,12 @@ pub struct AppConfig {
     /// 0 disables the stale signal.
     #[serde(default = "default_github_stale_days")]
     pub github_stale_days: u32,
+    /// Whether linked GitHub sources should update their Todo metadata.
+    #[serde(default = "default_github_sync_enabled")]
+    pub github_sync_enabled: bool,
+    /// Whether a closed/merged source automatically completes its linked Todo.
+    #[serde(default = "default_github_auto_complete_todos")]
+    pub github_auto_complete_todos: bool,
     /// Optional quiet window for due reminders; `None` keeps reminders
     /// always enabled (legacy behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,6 +219,8 @@ impl Default for AppConfig {
             command_palette_hotkey: default_command_palette_hotkey(),
             command_palette_enabled: default_command_palette_enabled(),
             github_stale_days: default_github_stale_days(),
+            github_sync_enabled: default_github_sync_enabled(),
+            github_auto_complete_todos: default_github_auto_complete_todos(),
             quiet_hours: None,
             theme: "system".into(),
             github_refresh_interval_minutes: 30,
@@ -272,6 +288,8 @@ mod tests {
         assert_eq!(config.quick_capture_hotkey, "Ctrl+Alt+Space");
         assert!(config.quick_capture_enabled);
         assert_eq!(config.github_stale_days, 14);
+        assert!(config.github_sync_enabled);
+        assert!(config.github_auto_complete_todos);
     }
 
     #[test]

@@ -472,32 +472,69 @@ fn apply_acrylic(window: &WebviewWindow) {
 }
 
 fn spawn_github_refresh(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(60));
-        let state = app.state::<AppState>();
-        let config = match state.storage.load_config() {
-            Ok(value) => value,
-            Err(err) => {
-                state
-                    .log
-                    .log("error", &format!("failed to load config: {err}"));
-                continue;
+    std::thread::spawn(move || {
+        let mut first_run = true;
+        loop {
+            if !first_run {
+                std::thread::sleep(Duration::from_secs(60));
             }
-        };
-        if config.github_refresh_interval_minutes == 0 {
-            continue;
-        }
-        let minute = chrono::Utc::now().timestamp() / 60;
-        if minute % i64::from(config.github_refresh_interval_minutes) == 0 {
-            match state.services.github.refresh_all() {
-                Ok(_) => {
-                    crate::events::emit_entity_changed(&app, "github", "*", "background-refreshed")
-                        .ok();
-                }
+            first_run = false;
+            let state = app.state::<AppState>();
+            let config = match state.storage.load_config() {
+                Ok(value) => value,
                 Err(err) => {
                     state
                         .log
-                        .log("error", &format!("background github refresh failed: {err}"));
+                        .log("error", &format!("failed to load config: {err}"));
+                    continue;
+                }
+            };
+            if config.github_refresh_interval_minutes == 0 {
+                continue;
+            }
+            let minute = chrono::Utc::now().timestamp() / 60;
+            if minute % i64::from(config.github_refresh_interval_minutes) == 0 {
+                match state.services.github.refresh_all() {
+                    Ok(_) => {
+                        if config.github_sync_enabled {
+                            let summary = state.services.github.sync_linked_todos(
+                                &state.services.todo,
+                                config.github_auto_complete_todos,
+                            );
+                            for id in &summary.changed_item_ids {
+                                let operation = if summary.auto_completed_item_ids.contains(id) {
+                                    "auto-completed"
+                                } else {
+                                    "source-state-changed"
+                                };
+                                crate::events::emit_entity_changed(&app, "todoItem", id, operation)
+                                    .ok();
+                            }
+                            crate::events::emit_entity_changed(
+                                &app,
+                                "github",
+                                "*",
+                                if summary.failed > 0 {
+                                    "sync-failed"
+                                } else {
+                                    "status-synced"
+                                },
+                            )
+                            .ok();
+                        }
+                        crate::events::emit_entity_changed(
+                            &app,
+                            "github",
+                            "*",
+                            "background-refreshed",
+                        )
+                        .ok();
+                    }
+                    Err(err) => {
+                        state
+                            .log
+                            .log("error", &format!("background github refresh failed: {err}"));
+                    }
                 }
             }
         }

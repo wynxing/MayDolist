@@ -155,6 +155,38 @@ impl TodoSource {
     }
 }
 
+/// Last known state of a GitHub item linked to a Todo.
+///
+/// This is deliberately separate from `TodoItem.completed`: a user can finish
+/// a Todo while its GitHub source is still open, and a source can be reopened
+/// after the Todo was automatically completed.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubSyncState {
+    Open,
+    Closed,
+    Merged,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSyncMetadata {
+    pub state: GithubSyncState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_completion_reason: Option<String>,
+    /// Set when the user manually unchecks an automatically completed Todo.
+    /// A later poll of the same closed source respects this local decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_completion_undone_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoItem {
@@ -171,6 +203,11 @@ pub struct TodoItem {
     /// shape (field is skipped when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<TodoSource>,
+    /// Optional synchronization metadata for a GitHub source. Old Todo data
+    /// without this field remains a normal local Todo until its source is
+    /// successfully checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_sync: Option<GithubSyncMetadata>,
     /// Optional due date, stored as ISO date (`YYYY-MM-DD`) or RFC3339
     /// datetime. Used by the Focus grouping and repeat generation. Old data
     /// without the field reads as `None` and keeps the old JSON shape.
@@ -275,6 +312,7 @@ mod tests {
             created_at: "2026-08-01T00:00:00Z".into(),
             updated_at: "2026-08-01T00:00:00Z".into(),
             source: None,
+            github_sync: None,
             due_date: Some("2026-08-20".into()),
             remind_at: Some("2026-08-20T09:00:00+08:00".into()),
             repeat: Some(RepeatRule::Weekly),
