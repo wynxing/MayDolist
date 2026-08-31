@@ -1,12 +1,14 @@
 use serde::Serialize;
+use ts_rs::TS;
 
 use super::TodoSource;
 
 /// One command offered by the global command palette. The static list and its
 /// matching keywords live in Rust so ordering and matching stay testable and
 /// consistent across windows; the frontend only renders what it receives.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PaletteCommand {
     /// Stable command id consumed by the frontend action dispatcher.
     pub id: String,
@@ -19,8 +21,9 @@ pub struct PaletteCommand {
 }
 
 /// One incomplete Todo item matched by the palette search.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PaletteTodo {
     pub id: String,
     pub title: String,
@@ -36,8 +39,9 @@ pub struct PaletteTodo {
 }
 
 /// One Note matched by the palette search (title or full-text content).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PaletteNote {
     pub id: String,
     pub title: String,
@@ -50,8 +54,9 @@ pub struct PaletteNote {
 
 /// One cached GitHub issue / PR matched by the palette search. Only local
 /// snapshot caches are read; the palette never triggers network requests.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PaletteGithub {
     /// `"pr"` or `"issue"`.
     pub kind: String,
@@ -63,8 +68,9 @@ pub struct PaletteGithub {
 }
 
 /// Read-only aggregation of command matches and per-domain search results.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PaletteSearchResult {
     pub query: String,
     pub commands: Vec<PaletteCommand>,

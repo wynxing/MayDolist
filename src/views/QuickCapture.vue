@@ -18,7 +18,9 @@ function focusInput() {
 }
 
 onMounted(async () => {
-  void useSettingsStore().init().catch(() => {});
+  void useSettingsStore()
+    .init()
+    .catch(() => {});
   unlisten = await listen("quick-capture-open", focusInput);
   focusInput();
 });
@@ -70,14 +72,18 @@ function onEsc() {
     >
       ×
     </button>
-    <form class="quick-form glass-card" :class="{ 'is-submitted': submitted }" @submit.prevent="submit">
+    <form
+      class="quick-form glass-card"
+      :class="{ 'is-submitted': submitted }"
+      @submit.prevent="submit"
+    >
       <label class="sr-only" for="quick-input">快速收集</label>
       <input
         id="quick-input"
         ref="input"
         v-model="text"
         class="quick-input"
-        placeholder="输入待办，或输入 /note 打开悬浮便签"
+        placeholder="输入待办（明天 / 周五 / 3天后 前缀可设到期日），或输入 /note 打开悬浮便签"
         :disabled="busy"
         autocomplete="off"
         spellcheck="false"
@@ -88,6 +94,9 @@ function onEsc() {
       </button>
     </form>
     <p v-if="error" class="quick-error" role="alert">{{ error }}</p>
-    <p class="quick-hint">Enter 保存到收件箱；/note 打开空白悬浮便签；Esc 或快捷键关闭</p>
+    <p class="quick-hint">
+      Enter 保存到收件箱；明天 / 周五 / 下周X / N天后 / 月底 前缀可设到期日；/note 或 /note 标题
+      打开悬浮便签；Esc 关闭
+    </p>
   </div>
 </template>

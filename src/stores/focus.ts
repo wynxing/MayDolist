@@ -1,18 +1,8 @@
-import { listen } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as api from "../api/focus";
+import { EntitySyncer } from "./entitySync";
 import type { FocusOverview } from "../types/focus";
-
-let ready = false;
-let timer: number | undefined;
-
-/** Debounce entity-changed refreshes so rapid edits (e.g. drag reorder) do
- *  not hammer the backend with overlapping focus queries. */
-function scheduleRefresh(refresh: () => Promise<void>) {
-  clearTimeout(timer);
-  timer = window.setTimeout(() => void refresh(), 150);
-}
 
 export const useFocusStore = defineStore("focus", () => {
   const overview = ref<FocusOverview | null>(null);
@@ -46,22 +36,12 @@ export const useFocusStore = defineStore("focus", () => {
     return inFlight;
   };
 
-  const init = async () => {
-    if (!ready) {
-      ready = true;
-      await listen<{ domain: string }>("entity-changed", (e) => {
-        const domain = e.payload.domain;
-        if (
-          domain.startsWith("todo") ||
-          domain === "note" ||
-          domain === "github"
-        ) {
-          scheduleRefresh(refresh);
-        }
-      });
-    }
-    await refresh();
-  };
+  const syncer = new EntitySyncer(
+    (domain) => domain.startsWith("todo") || domain === "note" || domain === "github",
+    refresh
+  );
+
+  const init = () => syncer.init();
 
   return { overview, loading, focusTodoId, error, init, refresh, requestFocus };
 });

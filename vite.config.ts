@@ -12,6 +12,23 @@ export default defineConfig(async () => ({
     __BUILD_ID__: JSON.stringify(buildId),
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        // Split third-party code into stable chunks so app-only changes do
+        // not invalidate the whole bundle.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("@tauri-apps")) return "tauri";
+          if (id.includes("/vue") || id.includes("@vue/") || id.includes("pinia")) {
+            return "vue";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

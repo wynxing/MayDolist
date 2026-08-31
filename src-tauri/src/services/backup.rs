@@ -610,11 +610,13 @@ mod tests {
     use super::*;
     use crate::models::WindowBounds;
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-backup-{}-{}", tag, uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(tag: &str) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::Builder::new()
+            .prefix(&format!("maydolist-backup-{tag}-"))
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path().to_path_buf();
+        (tmp, dir)
     }
 
     fn sample_note(id: &str) -> Note {
@@ -718,7 +720,7 @@ mod tests {
 
     #[test]
     fn export_package_contains_manifest_and_expected_layout() {
-        let dir = temp_dir("export-layout");
+        let (_tmp, dir) = temp_dir("export-layout");
         let storage = Storage::with_dir(&dir).unwrap();
         populate(&storage);
         let zip_path = dir.join("out.zip");
@@ -753,12 +755,11 @@ mod tests {
         assert_eq!(manifest.tool, "maydolist");
         assert_eq!(manifest.summary.notes, 2);
         assert!(manifest.summary.github_watchlist);
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn export_without_cache_omits_cache_entries() {
-        let dir = temp_dir("export-no-cache");
+        let (_tmp, dir) = temp_dir("export-no-cache");
         let storage = Storage::with_dir(&dir).unwrap();
         populate(&storage);
         let zip_path = dir.join("out-no-cache.zip");
@@ -768,12 +769,11 @@ mod tests {
         let entries = zip_entries(&zip_path);
         assert!(!entries.iter().any(|e| e.starts_with("github/cache/")));
         assert!(entries.contains(&"github/watchlist.json".to_string()));
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn export_appends_zip_extension_when_missing() {
-        let dir = temp_dir("export-ext");
+        let (_tmp, dir) = temp_dir("export-ext");
         let storage = Storage::with_dir(&dir).unwrap();
         populate(&storage);
         let path = dir.join("package");
@@ -782,12 +782,11 @@ mod tests {
             .unwrap();
         assert!(info.path.ends_with(".zip"));
         assert!(Path::new(&info.path).is_file());
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn export_and_import_roundtrip_restores_data() {
-        let source_dir = temp_dir("roundtrip-source");
+        let (_source_tmp, source_dir) = temp_dir("roundtrip-source");
         let source = Storage::with_dir(&source_dir).unwrap();
         populate(&source);
         let zip_path = source_dir.join("backup.zip");
@@ -795,7 +794,7 @@ mod tests {
             .export_to(&zip_path, true)
             .unwrap();
 
-        let target_dir = temp_dir("roundtrip-target");
+        let (_target_tmp, target_dir) = temp_dir("roundtrip-target");
         let target_storage = Arc::new(Storage::with_dir(&target_dir).unwrap());
         let target = BackupService::new(target_storage.clone());
         let info = target.import_from(&zip_path).unwrap();
@@ -823,13 +822,11 @@ mod tests {
             config.schema_version,
             crate::models::config::CONFIG_SCHEMA_VERSION
         );
-        fs::remove_dir_all(&source_dir).ok();
-        fs::remove_dir_all(&target_dir).ok();
     }
 
     #[test]
     fn import_empty_package_succeeds_with_skeleton() {
-        let source_dir = temp_dir("empty-source");
+        let (_source_tmp, source_dir) = temp_dir("empty-source");
         let source = Storage::with_dir(&source_dir).unwrap();
         source
             .save_config(&AppConfig {
@@ -844,7 +841,7 @@ mod tests {
         assert_eq!(info.notes, 0);
         assert_eq!(info.todos, 0);
 
-        let target_dir = temp_dir("empty-target");
+        let (_target_tmp, target_dir) = temp_dir("empty-target");
         let target_storage = Arc::new(Storage::with_dir(&target_dir).unwrap());
         let imported = BackupService::new(target_storage.clone())
             .import_from(&zip_path)
@@ -860,13 +857,11 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(target_storage.load_config().unwrap().theme, "light");
-        fs::remove_dir_all(&source_dir).ok();
-        fs::remove_dir_all(&target_dir).ok();
     }
 
     #[test]
     fn inspect_reports_preview_and_rejects_newer_version() {
-        let dir = temp_dir("inspect");
+        let (_tmp, dir) = temp_dir("inspect");
         let storage = Storage::with_dir(&dir).unwrap();
         populate(&storage);
         let zip_path = dir.join("pkg.zip");
@@ -905,12 +900,11 @@ mod tests {
             .inspect(&dir.join("newer.zip"))
             .unwrap_err();
         assert!(err.to_string().contains("版本"));
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn import_rejects_package_without_manifest_and_keeps_data() {
-        let dir = temp_dir("no-manifest");
+        let (_tmp, dir) = temp_dir("no-manifest");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
         let original_notes = storage.list_json::<Note>("notes").unwrap().len();
@@ -938,12 +932,11 @@ mod tests {
             original_notes
         );
         assert_eq!(storage.load_config().unwrap().theme, "dark");
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn import_rejects_path_traversal() {
-        let dir = temp_dir("traversal");
+        let (_tmp, dir) = temp_dir("traversal");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
 
@@ -960,12 +953,11 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("非法路径"));
         assert_eq!(storage.load_config().unwrap().theme, "dark");
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn import_rejects_invalid_core_json() {
-        let dir = temp_dir("bad-core");
+        let (_tmp, dir) = temp_dir("bad-core");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
         let original_notes = storage.list_json::<Note>("notes").unwrap().len();
@@ -988,12 +980,11 @@ mod tests {
             storage.list_json::<Note>("notes").unwrap().len(),
             original_notes
         );
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn import_skips_corrupt_cache_and_restores_core() {
-        let dir = temp_dir("bad-cache");
+        let (_tmp, dir) = temp_dir("bad-cache");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
 
@@ -1020,7 +1011,7 @@ mod tests {
         }
         writer.finish().unwrap();
 
-        let target_dir = temp_dir("bad-cache-target");
+        let (_target_tmp, target_dir) = temp_dir("bad-cache-target");
         let target = BackupService::new(Arc::new(Storage::with_dir(&target_dir).unwrap()));
         let info = target
             .import_from(&dir.join("with-corrupt-cache.zip"))
@@ -1033,13 +1024,11 @@ mod tests {
             target_storage.list_json::<TodoList>("todos").unwrap().len(),
             1
         );
-        fs::remove_dir_all(&dir).ok();
-        fs::remove_dir_all(&target_dir).ok();
     }
 
     #[test]
     fn import_rejects_duplicate_entries() {
-        let dir = temp_dir("dupes");
+        let (_tmp, dir) = temp_dir("dupes");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
 
@@ -1061,12 +1050,11 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("重复"), "unexpected error: {err}");
         assert_eq!(storage.load_config().unwrap().theme, "dark");
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn backup_creates_zip_and_prunes_old_ones() {
-        let dir = temp_dir("prune");
+        let (_tmp, dir) = temp_dir("prune");
         let storage = Arc::new(Storage::with_dir(&dir).unwrap());
         populate(&storage);
         let service = BackupService::new(storage.clone());
@@ -1097,6 +1085,5 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_by(|a, b| b.cmp(a));
         assert_eq!(names, sorted, "backups must be newest first");
-        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -1,10 +1,8 @@
-import { listen } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as api from "../api/todo";
+import { EntitySyncer } from "./entitySync";
 import type { TodoItem, TodoList } from "../types/todo";
-
-let ready = false;
 
 function sortLists(lists: TodoList[]): TodoList[] {
   return [...lists].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -17,25 +15,26 @@ function sortItems(items: TodoItem[]): TodoItem[] {
 export const useTodoStore = defineStore("todo", () => {
   const lists = ref<TodoList[]>([]);
   const error = ref<string | null>(null);
+  let inFlight: Promise<void> | null = null;
 
   const refresh = async () => {
-    try {
-      lists.value = await api.list();
-      error.value = null;
-    } catch (e) {
-      error.value = String(e);
-    }
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        lists.value = await api.list();
+        error.value = null;
+      } catch (e) {
+        error.value = String(e);
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
   };
 
-  const init = async () => {
-    if (!ready) {
-      ready = true;
-      await listen<{ domain: string }>("entity-changed", (e) => {
-        if (e.payload.domain.startsWith("todo")) void refresh();
-      });
-    }
-    await refresh();
-  };
+  const syncer = new EntitySyncer((domain) => domain.startsWith("todo"), refresh);
+
+  const init = () => syncer.init();
 
   const upsertList = (list: TodoList) => {
     const index = lists.value.findIndex((v) => v.id === list.id);
@@ -91,10 +90,7 @@ export const useTodoStore = defineStore("todo", () => {
       const v = await api.updateItem(id, { completed: !completed });
       upsertItem(v);
     },
-    patchItem: async (
-      id: string,
-      patch: Parameters<typeof api.updateItem>[1]
-    ) => {
+    patchItem: async (id: string, patch: Parameters<typeof api.updateItem>[1]) => {
       const v = await api.updateItem(id, patch);
       upsertItem(v);
       return v;

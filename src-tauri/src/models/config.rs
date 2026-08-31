@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::error::{AppError, AppResult};
 
@@ -7,6 +8,10 @@ pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 /// Allowed range for glass background opacity (40%..=100%).
 pub const GLASS_OPACITY_MIN: f64 = 0.4;
 pub const GLASS_OPACITY_MAX: f64 = 1.0;
+
+/// Allowed range for the triage "later" due-date offset in days.
+pub const TRIAGE_LATER_DAYS_MIN: u32 = 1;
+pub const TRIAGE_LATER_DAYS_MAX: u32 = 30;
 
 fn default_main_window_glass_opacity() -> f64 {
     0.52
@@ -44,6 +49,10 @@ fn default_github_auto_complete_todos() -> bool {
     true
 }
 
+fn default_triage_later_days() -> u32 {
+    3
+}
+
 fn deserialize_string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -55,8 +64,9 @@ where
 /// `start` and `end` (local `HH:MM`, 24h). A window that crosses midnight
 /// (e.g. 22:00–07:00) is supported. Invalid or equal start/end values are
 /// treated as "no quiet hours" so a hand-edited config never blocks toasts.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct QuietHours {
     pub start: String,
     pub end: String,
@@ -113,8 +123,9 @@ impl QuietHours {
 }
 
 /// Single-instance application config, stored as `config.json` in the data dir.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct AppConfig {
     pub schema_version: u32,
     #[serde(default, deserialize_with = "deserialize_string_or_default")]
@@ -145,6 +156,9 @@ pub struct AppConfig {
     /// Whether a closed/merged source automatically completes its linked Todo.
     #[serde(default = "default_github_auto_complete_todos")]
     pub github_auto_complete_todos: bool,
+    /// Days the inbox triage "later" action postpones the due date (1..=30).
+    #[serde(default = "default_triage_later_days")]
+    pub triage_later_days: u32,
     /// Optional quiet window for due reminders; `None` keeps reminders
     /// always enabled (legacy behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,12 +212,17 @@ impl AppConfig {
         {
             self.quiet_hours = None;
         }
+        let triage_before = self.triage_later_days;
+        self.triage_later_days = self
+            .triage_later_days
+            .clamp(TRIAGE_LATER_DAYS_MIN, TRIAGE_LATER_DAYS_MAX);
         schema_before != self.schema_version
             || quick_hotkey_before != self.quick_capture_hotkey
             || palette_hotkey_before != self.command_palette_hotkey
             || main_before != self.main_window_glass_opacity
             || floating_before != self.floating_note_glass_opacity
             || quiet_before != self.quiet_hours
+            || triage_before != self.triage_later_days
     }
 }
 
@@ -221,6 +240,7 @@ impl Default for AppConfig {
             github_stale_days: default_github_stale_days(),
             github_sync_enabled: default_github_sync_enabled(),
             github_auto_complete_todos: default_github_auto_complete_todos(),
+            triage_later_days: default_triage_later_days(),
             quiet_hours: None,
             theme: "system".into(),
             github_refresh_interval_minutes: 30,
@@ -370,6 +390,48 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let restored: AppConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.github_stale_days, 0);
+    }
+
+    #[test]
+    fn legacy_config_receives_triage_later_days_default() {
+        let json = r#"{
+            "schemaVersion": 2,
+            "dataDir": null,
+            "hotCorner": "top-right",
+            "hotkey": "Ctrl+Alt+M",
+            "theme": "dark",
+            "githubRefreshIntervalMinutes": 30,
+            "autostart": false,
+            "firstRun": true
+        }"#;
+        let restored: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.triage_later_days, 3);
+        let json = serde_json::to_string(&restored).unwrap();
+        assert!(json.contains("\"triageLaterDays\":3"));
+    }
+
+    #[test]
+    fn sanitize_clamps_triage_later_days_into_range() {
+        let mut too_small = AppConfig {
+            triage_later_days: 0,
+            ..Default::default()
+        };
+        assert!(too_small.sanitize());
+        assert_eq!(too_small.triage_later_days, TRIAGE_LATER_DAYS_MIN);
+
+        let mut too_large = AppConfig {
+            triage_later_days: 99,
+            ..Default::default()
+        };
+        assert!(too_large.sanitize());
+        assert_eq!(too_large.triage_later_days, TRIAGE_LATER_DAYS_MAX);
+
+        let mut in_range = AppConfig {
+            triage_later_days: 7,
+            ..Default::default()
+        };
+        assert!(!in_range.sanitize());
+        assert_eq!(in_range.triage_later_days, 7);
     }
 
     #[test]

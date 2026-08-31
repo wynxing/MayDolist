@@ -5,35 +5,47 @@ use crate::{
     AppState,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::{AppHandle, State};
+use ts_rs::TS;
 
 /// Optional due / reminder / repeat fields sent from the frontend. The UI
 /// always sends the complete schedule when editing, so `null` means "cleared"
 /// and an omitted `schedule` key means "leave unchanged".
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
+#[ts(export)]
 pub struct TodoScheduleInput {
+    #[ts(optional)]
     pub due_date: Option<String>,
+    #[ts(optional)]
     pub remind_at: Option<String>,
+    #[ts(optional)]
     pub repeat: Option<RepeatRule>,
+    #[ts(optional)]
     pub repeat_until: Option<String>,
 }
 
 /// Update payload for `todo_update_item`. `schedule` is optional so callers
 /// that only rename / complete / delete never touch the due fields.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
+#[ts(export)]
 pub struct TodoPatchInput {
+    #[ts(optional)]
     pub title: Option<String>,
+    #[ts(optional)]
     pub completed: Option<bool>,
+    #[ts(optional)]
     pub deleted: Option<bool>,
+    #[ts(optional)]
     pub schedule: Option<TodoScheduleInput>,
 }
 #[tauri::command]
 pub fn todo_list(
     state: State<'_, AppState>,
     include_deleted: Option<bool>,
-) -> AppResult<Vec<TodoList>> {
+) -> AppResult<Arc<Vec<TodoList>>> {
     state.services.todo.list(include_deleted.unwrap_or(false))
 }
 #[tauri::command]
@@ -96,8 +108,9 @@ pub fn todo_create_item(
 /// Result of converting a GitHub issue / PR into a Todo. `source_type` is the
 /// source kind (`"github-pr"` / `"github-issue"`) and `target_list_id` is the
 /// inbox list the item landed in.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TodoFromGithubResult {
     pub source_type: String,
     pub id: String,

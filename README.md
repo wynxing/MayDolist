@@ -20,8 +20,8 @@ MayDolist 适合那些需要在编码、Review 和日常工作之间快速切换
 
 - `Ctrl+Alt+Space` 呼出快速收集窗口，再按一次即可收起。
 - 普通文本保存为 Todo，并进入「收件箱」。
-- 支持最小自然语言到期日前缀：`明天 提交周报`、`周五 清理 stale PR`、`3天后 复查`、`月底 发布`——解析结果自动写入到期日；没有日期前缀时就是普通 Todo。
-- 单独输入 `/note` 可创建并打开一个空白悬浮便签。
+- 支持最小自然语言到期日前缀：`明天 提交周报`、`周五 清理 stale PR`、`下周五 开会`、`3天后 复查`、`月底 发布`——解析结果自动写入到期日；没有日期前缀时就是普通 Todo。
+- 输入 `/note` 创建并打开一个空白悬浮便签；`/note 标题` 直接创建带标题的便签。
 - `Enter` 提交，`Esc` 或右上角关闭按钮收起窗口；未提交的输入会保留。
 - `Ctrl+Alt+M` 或屏幕热角呼出 / 隐藏主面板。
 
@@ -39,7 +39,7 @@ MayDolist 适合那些需要在编码、Review 和日常工作之间快速切换
 在「待办」页点击收件箱旁的「处理模式」，把收件箱逐条归零：
 
 - 一次只显示一条未处理条目，顶部显示剩余条数与进度条，随时按 `Esc` 退出回到普通列表。
-- `1` 今天做（到期日 = 今天）· `2` 稍后做（到期日 = +3 天）· `3` 转列表（保留 GitHub 来源徽标与「打开来源」）· `4` 完成 · `5` 删除（软删除，可在回收站恢复）。
+- `1` 今天做（到期日 = 今天）· `2` 稍后做（到期日顺延，天数可在设置中调整，默认 3 天）· `3` 转列表（保留 GitHub 来源徽标与「打开来源」）· `4` 完成 · `5` 删除（软删除，可在回收站恢复）。
 - 每个动作立即进入下一条；处理完最后一条显示「收件箱已清空」；误操作可取消完成或在回收站恢复。
 - 光标基于条目稳定 id，其他窗口修改列表后自动校正，不会跳过或重复处理；中文输入法组合输入不会误触发快捷键。
 
@@ -173,15 +173,22 @@ MayDolist 的产品边界是「本地优先的个人行动台」，不是云同�
 
 ```powershell
 pnpm check
+pnpm format:check
 pnpm build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+后端模型变更后需重新生成前端类型绑定（产物在 `src/types/generated/`，需一并提交）：
+
+```powershell
+pnpm gen:types
+```
+
 ## 项目状态
 
-当前版本：`1.2.3`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
+当前版本：`1.3.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 

@@ -1,18 +1,21 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use super::{ActionSignal, GithubSyncMetadata, RepeatRule, TodoSource};
 
 /// Per-section load state of the Focus read-only projection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum FocusSectionState {
     Ready,
     Error,
 }
 
 /// One incomplete Todo item shown in the Focus view.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusTodo {
     pub id: String,
     pub title: String,
@@ -36,8 +39,9 @@ pub struct FocusTodo {
 
 /// One due-state group of the Focus todo section. Keys are stable:
 /// `overdue` / `today` / `soon` / `none`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusTodoGroup {
     pub key: String,
     pub title: String,
@@ -47,8 +51,9 @@ pub struct FocusTodoGroup {
 
 /// Todo section of the Focus projection, grouped by due state. Non-empty
 /// groups only, in priority order (overdue → today → soon → none).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusTodoSection {
     pub state: FocusSectionState,
     pub error: Option<String>,
@@ -58,8 +63,9 @@ pub struct FocusTodoSection {
 }
 
 /// One pinned or recently-updated Note shown in the Focus view.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusNote {
     pub id: String,
     pub title: String,
@@ -71,8 +77,9 @@ pub struct FocusNote {
 }
 
 /// One open GitHub issue or pull request that needs action.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusGithub {
     /// `"pr"` or `"issue"` — the source kind for display and dedup.
     pub kind: String,
@@ -91,8 +98,9 @@ pub struct FocusGithub {
 
 /// One Focus section (todo / note / github) with per-domain state so a single
 /// failing domain never blocks the others.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusSection<T> {
     pub state: FocusSectionState,
     /// Human-readable failure message. `Some` with items present means a
@@ -111,8 +119,9 @@ pub struct FocusSection<T> {
 /// Read-only aggregation of todos, notes and GitHub items for the Focus view.
 /// It never writes back into the domain stores; domain file formats stay
 /// untouched.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FocusOverview {
     pub generated_at: String,
     pub todo: FocusTodoSection,

@@ -7,19 +7,33 @@ use crate::{
 };
 use serde::Serialize;
 use tauri::{AppHandle, State};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GithubRefreshResult {
     pub snapshot: RepoSnapshot,
     pub sync: GithubSyncSummary,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GithubRefreshAllResult {
     pub snapshots: Vec<RepoSnapshot>,
     pub sync: GithubSyncSummary,
+}
+
+/// Everything the GitHub view needs for its first paint, in one IPC round
+/// trip (replaces the previous status + watchlist + N snapshot calls).
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GithubOverview {
+    pub auth: GhAuthStatus,
+    pub watchlist: Vec<RepoWatch>,
+    pub snapshots: Vec<RepoSnapshot>,
 }
 
 fn emit_sync_events(app: &AppHandle, summary: &GithubSyncSummary) {
@@ -244,4 +258,26 @@ pub fn github_get_snapshot(
     full_name: String,
 ) -> AppResult<Option<RepoSnapshot>> {
     state.services.github.snapshot(&full_name)
+}
+
+#[tauri::command]
+pub async fn github_overview(state: State<'_, AppState>) -> AppResult<GithubOverview> {
+    let github = state.services.github.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let auth = github.status();
+        let watchlist = github.watchlist()?;
+        let mut snapshots = Vec::new();
+        for watch in &watchlist {
+            if let Some(snapshot) = github.snapshot(&watch.full_name)? {
+                snapshots.push(snapshot);
+            }
+        }
+        Ok::<_, crate::error::AppError>(GithubOverview {
+            auth,
+            watchlist,
+            snapshots,
+        })
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Internal(e.to_string()))?
 }

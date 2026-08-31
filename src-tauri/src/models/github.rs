@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Stable, UI-independent action signals for GitHub items. The UI only ever
 /// consumes this enum (serialized camelCase); it never depends on raw GitHub
 /// strings such as filter names or API status values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum ActionSignal {
     /// 需要我处理：被分配 / 被提及 / 参与 / 手动关注的条目。
     NeedsAction,
@@ -85,8 +87,9 @@ pub fn refresh_stale(
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GhAuthStatus {
     pub state: String,
     pub logged_in: bool,
@@ -95,16 +98,18 @@ pub struct GhAuthStatus {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GhIgnoredItem {
     pub number: u64,
     /// `"pr"` or `"issue"`.
     pub kind: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct RepoWatch {
     pub full_name: String,
     pub filters: Vec<String>,
@@ -120,8 +125,9 @@ pub struct RepoWatch {
     pub signal_filters: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GhIssue {
     pub number: u64,
     pub title: String,
@@ -138,8 +144,9 @@ pub struct GhIssue {
     pub signals: Vec<ActionSignal>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GhPullRequest {
     pub number: u64,
     pub title: String,
@@ -167,8 +174,9 @@ pub struct GhPullRequest {
 }
 
 /// Snapshot cache for one watched repository, mirroring `github/cache/<repo>.json`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct RepoSnapshot {
     pub schema_version: u32,
     pub repo: String,

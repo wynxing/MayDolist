@@ -31,6 +31,7 @@ const query = ref("");
 const result = ref<PaletteSearchResult | null>(null);
 const selected = ref(0);
 const busy = ref(false);
+const searching = ref(false);
 const error = ref("");
 const feedback = ref("");
 const input = ref<HTMLInputElement | null>(null);
@@ -38,6 +39,7 @@ const input = ref<HTMLInputElement | null>(null);
 let unlisten: UnlistenFn | null = null;
 let searchTimer: number | undefined;
 let closeTimer: number | undefined;
+let searchSeq = 0;
 
 const rows = computed<Row[]>(() => {
   const r = result.value;
@@ -51,12 +53,8 @@ const rows = computed<Row[]>(() => {
 });
 
 const todoStart = computed(() => result.value?.commands.length ?? 0);
-const noteStart = computed(
-  () => todoStart.value + (result.value?.todos.length ?? 0)
-);
-const githubStart = computed(
-  () => noteStart.value + (result.value?.notes.length ?? 0)
-);
+const noteStart = computed(() => todoStart.value + (result.value?.todos.length ?? 0));
+const githubStart = computed(() => noteStart.value + (result.value?.notes.length ?? 0));
 
 function placeholder() {
   if (mode.value === "new-todo") return "输入待办标题，Enter 保存到收件箱";
@@ -102,15 +100,20 @@ function startMode(next: Mode) {
 }
 
 async function runSearch(text: string) {
-  busy.value = true;
+  // Sequence guard: a slow response must never overwrite a newer search.
+  const seq = ++searchSeq;
+  searching.value = true;
   error.value = "";
   try {
-    result.value = await paletteApi.search(text);
+    const next = await paletteApi.search(text);
+    if (seq !== searchSeq) return;
+    result.value = next;
     selected.value = 0;
   } catch (e) {
+    if (seq !== searchSeq) return;
     error.value = String(e);
   } finally {
-    busy.value = false;
+    if (seq === searchSeq) searching.value = false;
   }
 }
 
@@ -136,8 +139,7 @@ function onKeydown(event: KeyboardEvent) {
   } else if (event.key === "ArrowUp") {
     event.preventDefault();
     if (rows.value.length) {
-      selected.value =
-        (selected.value - 1 + rows.value.length) % rows.value.length;
+      selected.value = (selected.value - 1 + rows.value.length) % rows.value.length;
     }
   } else if (event.key === "Enter") {
     // IME composition must never trigger execution (中文输入法组合输入).
@@ -204,6 +206,22 @@ async function runCommand(id: string) {
     case "open-data-dir":
       await runAction(() => backupApi.openDataDir(), "已打开数据目录");
       break;
+    case "refresh-github":
+      await runAction(() => githubApi.refreshAll(), "GitHub 已刷新");
+      break;
+    case "open-quick-capture": {
+      if (busy.value) break;
+      busy.value = true;
+      try {
+        await quickApi.show();
+        await paletteApi.hide();
+      } catch (e) {
+        error.value = String(e);
+      } finally {
+        busy.value = false;
+      }
+      break;
+    }
   }
 }
 
@@ -451,15 +469,13 @@ onBeforeUnmount(() => {
                 </span>
                 {{ github.repo }}#{{ github.number }} {{ github.title }}
               </span>
-              <span class="palette-row-meta">
-                更新 {{ formatTime(github.updatedAt) }}
-              </span>
+              <span class="palette-row-meta"> 更新 {{ formatTime(github.updatedAt) }} </span>
             </li>
           </ul>
         </section>
 
         <p
-          v-if="mode === 'search' && query && rows.length === 0 && !busy"
+          v-if="mode === 'search' && query && rows.length === 0 && !busy && !searching"
           class="palette-empty"
         >
           没有匹配结果：试试命令名、Todo 标题、便签内容或 GitHub 仓库 / #编号。
@@ -479,9 +495,11 @@ onBeforeUnmount(() => {
       <span>
         {{
           mode === "search"
-            ? query
-              ? "输入即搜索（防抖 150ms）"
-              : "输入命令名或关键词"
+            ? searching
+              ? "搜索中…"
+              : query
+                ? "输入即搜索（防抖 150ms）"
+                : "输入命令名或关键词"
             : "Enter 确认 · Esc 返回"
         }}
       </span>

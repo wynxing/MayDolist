@@ -12,12 +12,7 @@ const emit = defineEmits<{ action: [] }>();
   <div class="empty-state">
     <p v-if="title" class="empty-state-title">{{ title }}</p>
     <p class="empty-state-text">{{ text }}</p>
-    <button
-      v-if="actionLabel"
-      class="btn primary"
-      type="button"
-      @click="emit('action')"
-    >
+    <button v-if="actionLabel" class="btn primary" type="button" @click="emit('action')">
       {{ actionLabel }}
     </button>
   </div>

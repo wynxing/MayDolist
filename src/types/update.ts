@@ -1,11 +1,5 @@
 export type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "up-to-date"
-  | "available"
-  | "downloading"
-  | "ready-to-restart"
-  | "failed";
+  "idle" | "checking" | "up-to-date" | "available" | "downloading" | "ready-to-restart" | "failed";
 
 export interface UpdateRuntimeInfo {
   currentVersion: string;

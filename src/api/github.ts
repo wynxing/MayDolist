@@ -1,5 +1,6 @@
 import type {
   GhAuthStatus,
+  GithubOverview,
   GithubRefreshAllResult,
   GithubRefreshResult,
   GithubSyncSummary,
@@ -9,9 +10,9 @@ import type {
 import { call } from "./index";
 
 export const status = () => call<GhAuthStatus>("github_status");
+export const overview = () => call<GithubOverview>("github_overview");
 export const watchlist = () => call<RepoWatch[]>("github_watchlist");
-export const addWatch = (fullName: string) =>
-  call<RepoWatch[]>("github_watch_add", { fullName });
+export const addWatch = (fullName: string) => call<RepoWatch[]>("github_watch_add", { fullName });
 export const removeWatch = (fullName: string) =>
   call<RepoWatch[]>("github_watch_remove", { fullName });
 export const filters = (fullName: string, filters: string[]) =>
@@ -29,8 +30,7 @@ export const unpinItem = (fullName: string, number: number) =>
 export const refreshRepo = (fullName: string) =>
   call<GithubRefreshResult>("github_refresh_repo", { fullName });
 export const refreshAll = () => call<GithubRefreshAllResult>("github_refresh_all");
-export const syncLinkedTodos = () =>
-  call<GithubSyncSummary>("github_sync_linked_todos");
+export const syncLinkedTodos = () => call<GithubSyncSummary>("github_sync_linked_todos");
 export const snapshot = (fullName: string) =>
   call<RepoSnapshot | null>("github_get_snapshot", { fullName });
 export const open = (url: string) => call<void>("open_external", { url });

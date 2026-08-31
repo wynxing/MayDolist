@@ -1,12 +1,14 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::error::{AppError, AppResult};
 
 /// Repeat rule of a recurring Todo item. Serialized lowercase (`daily` /
 /// `weekly` / `biweekly` / `monthly`) so the frontend can consume it directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum RepeatRule {
     Daily,
     Weekly,
@@ -108,8 +110,9 @@ fn next_monthly(anchor: NaiveDate, today: NaiveDate) -> NaiveDate {
 /// Optional source reference linking a Todo item back to an external item
 /// (MVP: GitHub issues and pull requests). Old Todo data without the field
 /// reads as `None` and behaves like a normal Todo.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TodoSource {
     /// `"github-issue"` or `"github-pr"`, serialized as `type` per the #19
     /// data contract so the frontend reads `source.type`.
@@ -160,8 +163,9 @@ impl TodoSource {
 /// This is deliberately separate from `TodoItem.completed`: a user can finish
 /// a Todo while its GitHub source is still open, and a source can be reopened
 /// after the Todo was automatically completed.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum GithubSyncState {
     Open,
     Closed,
@@ -169,8 +173,9 @@ pub enum GithubSyncState {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct GithubSyncMetadata {
     pub state: GithubSyncState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,8 +192,9 @@ pub struct GithubSyncMetadata {
     pub sync_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TodoItem {
     pub id: String,
     pub title: String,
@@ -233,8 +239,9 @@ pub struct TodoItem {
     pub last_reminded_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct TodoList {
     pub schema_version: u32,
     pub id: String,

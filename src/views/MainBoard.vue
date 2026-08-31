@@ -104,22 +104,35 @@ onMounted(async () => {
           {{ t[1] }}
         </button>
       </nav>
-      <button class="close" aria-label="隐藏 MayDolist" title="隐藏" @click="call('app_hide_main')">×</button>
+      <button class="close" aria-label="隐藏 MayDolist" title="隐藏" @click="call('app_hide_main')">
+        ×
+      </button>
     </header>
     <aside v-if="showFirstRun" class="first-run glass-card">
       <h2>欢迎使用 MayDolist</h2>
       <p>数据只存在本机。用快捷键随时捕获，从「今日」判断下一步。</p>
       <ul class="first-run-keys">
-        <li><kbd>{{ settings.config?.hotkey || "Ctrl+Alt+M" }}</kbd> 主面板</li>
-        <li><kbd>{{ settings.config?.quickCaptureHotkey || "Ctrl+Alt+Space" }}</kbd> 快速收集</li>
-        <li><kbd>{{ settings.config?.commandPaletteHotkey || "Ctrl+K" }}</kbd> 命令面板</li>
+        <li>
+          <kbd>{{ settings.config?.hotkey || "Ctrl+Alt+M" }}</kbd> 主面板
+        </li>
+        <li>
+          <kbd>{{ settings.config?.quickCaptureHotkey || "Ctrl+Alt+Space" }}</kbd> 快速收集
+        </li>
+        <li>
+          <kbd>{{ settings.config?.commandPaletteHotkey || "Ctrl+K" }}</kbd> 命令面板
+        </li>
       </ul>
       <p>数据目录：{{ settings.config?.dataDir }}</p>
       <button class="btn primary" type="button" @click="dismissFirstRun">开始使用</button>
     </aside>
     <main class="content">
       <KeepAlive>
-        <component :is="activeView" :key="active" class="view-enter-active" @navigate="active = $event" />
+        <component
+          :is="activeView"
+          :key="active"
+          class="view-enter-active"
+          @navigate="active = $event"
+        />
       </KeepAlive>
     </main>
     <footer v-if="statusText" class="statusbar">

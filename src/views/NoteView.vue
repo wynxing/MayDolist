@@ -21,14 +21,21 @@ const pendingDelete = ref(false);
 let timer: number | undefined;
 let applyingRemote = false;
 
-const shown = computed(() => store.notes.filter((note) => {
-  const queryValue = query.value.toLowerCase();
-  const matchesQuery = !queryValue || [note.title, note.content, ...note.tags]
-    .some((value) => value.toLowerCase().includes(queryValue));
-  return matchesQuery && (!selectedTag.value || note.tags.includes(selectedTag.value));
-}));
+const shown = computed(() =>
+  store.notes.filter((note) => {
+    const queryValue = query.value.toLowerCase();
+    const matchesQuery =
+      !queryValue ||
+      [note.title, note.content, ...note.tags].some((value) =>
+        value.toLowerCase().includes(queryValue)
+      );
+    return matchesQuery && (!selectedTag.value || note.tags.includes(selectedTag.value));
+  })
+);
 const allTags = computed(() => [...new Set(store.notes.flatMap((note) => note.tags))].sort());
-const selectedNote = computed(() => store.notes.find((note) => note.id === selectedId.value) ?? null);
+const selectedNote = computed(
+  () => store.notes.find((note) => note.id === selectedId.value) ?? null
+);
 
 onMounted(async () => {
   await store.init();
@@ -93,7 +100,10 @@ async function save() {
   const snapshot = {
     title: title.value || "未命名",
     content: content.value,
-    tags: tagsText.value.split(/[,，]/).map((value) => value.trim()).filter(Boolean),
+    tags: tagsText.value
+      .split(/[,，]/)
+      .map((value) => value.trim())
+      .filter(Boolean),
   };
   const tagsSnapshot = snapshot.tags.join(", ");
   status.value = "保存中…";
@@ -102,8 +112,11 @@ async function save() {
     if (
       (title.value || "未命名") === snapshot.title &&
       content.value === snapshot.content &&
-      tagsText.value.split(/[,，]/).map((value) => value.trim()).filter(Boolean).join(", ") ===
-        tagsSnapshot
+      tagsText.value
+        .split(/[,，]/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(", ") === tagsSnapshot
     ) {
       dirty.value = false;
     }
@@ -153,7 +166,11 @@ watch(
 
 <template>
   <section class="note-view" aria-labelledby="note-heading">
-    <PageHeader heading-id="note-heading" title="我的便签" subtitle="把想法留在手边，需要时再拖到桌面。">
+    <PageHeader
+      heading-id="note-heading"
+      title="我的便签"
+      subtitle="把想法留在手边，需要时再拖到桌面。"
+    >
       <template #actions>
         <button class="btn primary" type="button" @click="add">新建便签</button>
       </template>
@@ -178,11 +195,11 @@ watch(
             :aria-selected="selectedId === note.id"
             @click="choose(note.id)"
           >
-            <span class="select-title">
-              <PinMark :on="note.pinned" />{{ note.title }}
-            </span>
+            <span class="select-title"> <PinMark :on="note.pinned" />{{ note.title }} </span>
             <small v-if="note.tags.length" class="select-meta">{{ note.tags.join(" · ") }}</small>
-            <small v-else-if="preview(note.content)" class="select-preview">{{ preview(note.content) }}</small>
+            <small v-else-if="preview(note.content)" class="select-preview">{{
+              preview(note.content)
+            }}</small>
           </button>
         </div>
         <EmptyState v-else text="没有匹配的便签" action-label="新建便签" @action="add" />
@@ -200,7 +217,10 @@ watch(
           @cancel="pendingDelete = false"
         />
         <div class="editor-footer">
-          <span :class="{ error: status.startsWith('Error') || status.includes('失败') }" role="status">
+          <span
+            :class="{ error: status.startsWith('Error') || status.includes('失败') }"
+            role="status"
+          >
             {{ status }}
           </span>
           <div class="note-color-dots" role="group" aria-label="便签颜色">
@@ -227,7 +247,13 @@ watch(
           <button class="btn danger" type="button" @click="pendingDelete = true">删除</button>
         </div>
       </div>
-      <EmptyState v-else title="还没有打开便签" text="选择左侧一条，或新建一条开始写。" action-label="新建便签" @action="add" />
+      <EmptyState
+        v-else
+        title="还没有打开便签"
+        text="选择左侧一条，或新建一条开始写。"
+        action-label="新建便签"
+        @action="add"
+      />
     </div>
   </section>
 </template>

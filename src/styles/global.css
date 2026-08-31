@@ -7,7 +7,8 @@
   --glass-blur-soft: blur(20px);
   --glass-saturate: saturate(155%);
   --glass-saturate-soft: saturate(140%);
-  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 1px 0 0 rgba(255, 255, 255, 0.055);
+  --glass-highlight:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 1px 0 0 rgba(255, 255, 255, 0.055);
   --glass-shadow: 0 22px 64px rgba(0, 0, 0, 0.32), 0 3px 14px rgba(0, 0, 0, 0.2);
   --glass-tint:
     radial-gradient(ellipse at 18% -12%, rgba(151, 198, 255, 0.16), transparent 40%),
@@ -37,7 +38,8 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.82), inset 1px 0 0 rgba(255, 255, 255, 0.38);
+  --glass-highlight:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82), inset 1px 0 0 rgba(255, 255, 255, 0.38);
   --glass-shadow: 0 18px 50px rgba(45, 57, 78, 0.16);
   --glass-tint:
     radial-gradient(ellipse at 16% -10%, rgba(255, 255, 255, 0.62), transparent 42%),
@@ -109,7 +111,10 @@ select:focus-visible {
   background-color: var(--card);
   border: 1px solid var(--border);
   box-shadow: var(--glass-highlight);
-  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 /* Shell layout */
@@ -127,7 +132,9 @@ select:focus-visible {
   box-shadow: var(--glass-shadow), var(--glass-highlight);
   backdrop-filter: var(--glass-blur) var(--glass-saturate);
   -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
-  transition: background-color 140ms ease, box-shadow 180ms ease;
+  transition:
+    background-color 140ms ease,
+    box-shadow 180ms ease;
 }
 
 .shell::before,
@@ -139,7 +146,13 @@ select:focus-visible {
   border-radius: inherit;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.07), transparent 16%, transparent 84%, rgba(255, 255, 255, 0.025)),
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.07),
+      transparent 16%,
+      transparent 84%,
+      rgba(255, 255, 255, 0.025)
+    ),
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 16%);
   opacity: calc(1.08 - var(--glass-opacity));
 }
@@ -476,11 +489,21 @@ textarea.input {
   background: var(--accent);
 }
 
-.note-color-dot[data-color="blue"] { background: #6ea8ff; }
-.note-color-dot[data-color="purple"] { background: #a78bfa; }
-.note-color-dot[data-color="yellow"] { background: #eab308; }
-.note-color-dot[data-color="green"] { background: #4ade80; }
-.note-color-dot[data-color="rose"] { background: #fb7185; }
+.note-color-dot[data-color="blue"] {
+  background: #6ea8ff;
+}
+.note-color-dot[data-color="purple"] {
+  background: #a78bfa;
+}
+.note-color-dot[data-color="yellow"] {
+  background: #eab308;
+}
+.note-color-dot[data-color="green"] {
+  background: #4ade80;
+}
+.note-color-dot[data-color="rose"] {
+  background: #fb7185;
+}
 
 .note-color-dot.active {
   border-color: var(--text);
@@ -490,11 +513,21 @@ textarea.input {
   border-left: 3px solid #6ea8ff;
 }
 
-.note-accent[data-color="blue"] { border-left-color: #6ea8ff; }
-.note-accent[data-color="purple"] { border-left-color: #a78bfa; }
-.note-accent[data-color="yellow"] { border-left-color: #eab308; }
-.note-accent[data-color="green"] { border-left-color: #4ade80; }
-.note-accent[data-color="rose"] { border-left-color: #fb7185; }
+.note-accent[data-color="blue"] {
+  border-left-color: #6ea8ff;
+}
+.note-accent[data-color="purple"] {
+  border-left-color: #a78bfa;
+}
+.note-accent[data-color="yellow"] {
+  border-left-color: #eab308;
+}
+.note-accent[data-color="green"] {
+  border-left-color: #4ade80;
+}
+.note-accent[data-color="rose"] {
+  border-left-color: #fb7185;
+}
 
 .first-run {
   margin: 0 14px 12px;
@@ -531,7 +564,9 @@ textarea.input {
 
 .triage-slide-enter-active,
 .triage-slide-leave-active {
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
 }
 
 .triage-slide-enter-from {
@@ -548,13 +583,17 @@ textarea.input {
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 .quick-form.is-submitted {
   transform: scale(0.98);
   opacity: 0.72;
-  transition: transform 120ms ease, opacity 120ms ease;
+  transition:
+    transform 120ms ease,
+    opacity 120ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -625,7 +664,10 @@ textarea.input {
 .todo-group {
   border-radius: 14px;
   padding: 12px;
-  transition: opacity 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+  transition:
+    opacity 0.14s ease,
+    border-color 0.14s ease,
+    background 0.14s ease;
 }
 
 .todo-group.dragging {
@@ -756,7 +798,9 @@ textarea.input {
   border: 1px solid transparent;
   border-radius: 9px;
   cursor: grab;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .todo-item:hover {
@@ -1639,9 +1683,27 @@ textarea.input {
     gap: 10px;
   }
 }
-.filter-row { display: flex; gap: 14px; margin: 8px 0; color: var(--muted); flex-wrap: wrap; }
-.gh-link { display: block; flex: 1; min-width: 0; border: 0; color: var(--text); background: transparent; padding: 6px; text-align: left; cursor: pointer; }
-.gh-link:hover { background: var(--card-hover); }
+.filter-row {
+  display: flex;
+  gap: 14px;
+  margin: 8px 0;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.gh-link {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  padding: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.gh-link:hover {
+  background: var(--card-hover);
+}
 .gh-link .gh-title-block {
   display: flex;
   flex-direction: column;
@@ -1710,10 +1772,18 @@ textarea.input {
   background: var(--card-hover);
   color: var(--muted);
 }
-:root[data-theme="light"] .gh-signal-badge.needsAction { color: #15803d; }
-:root[data-theme="light"] .gh-signal-badge.needsReview { color: #1d4ed8; }
-:root[data-theme="light"] .gh-signal-badge.ciFailed { color: #b91c1c; }
-:root[data-theme="light"] .gh-signal-badge.stale { color: #b45309; }
+:root[data-theme="light"] .gh-signal-badge.needsAction {
+  color: #15803d;
+}
+:root[data-theme="light"] .gh-signal-badge.needsReview {
+  color: #1d4ed8;
+}
+:root[data-theme="light"] .gh-signal-badge.ciFailed {
+  color: #b91c1c;
+}
+:root[data-theme="light"] .gh-signal-badge.stale {
+  color: #b45309;
+}
 .gh-signal-label {
   font-size: 12px;
   color: var(--muted);
@@ -1821,7 +1891,9 @@ textarea.input {
   box-shadow: var(--glass-shadow), var(--glass-highlight);
   backdrop-filter: var(--glass-blur) var(--glass-saturate);
   -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturate);
-  transition: background-color 140ms ease, box-shadow 180ms ease;
+  transition:
+    background-color 140ms ease,
+    box-shadow 180ms ease;
 }
 
 .floating::after {
@@ -1837,18 +1909,47 @@ textarea.input {
   pointer-events: none;
 }
 
-.floating[data-color="purple"]::after { background: #a78bfa; }
-.floating[data-color="yellow"]::after { background: #eab308; }
-.floating[data-color="green"]::after { background: #4ade80; }
-.floating[data-color="rose"]::after { background: #fb7185; }
+.floating[data-color="purple"]::after {
+  background: #a78bfa;
+}
+.floating[data-color="yellow"]::after {
+  background: #eab308;
+}
+.floating[data-color="green"]::after {
+  background: #4ade80;
+}
+.floating[data-color="rose"]::after {
+  background: #fb7185;
+}
 .floating .window-drag {
   margin: 0 -10px 8px;
   border-radius: 11px 11px 0 0;
 }
-.floating header { display: flex; align-items: center; height: 36px; gap: 8px; border-bottom: 1px solid transparent; }
-.floating-title { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 6px; outline: 0; padding: 4px 8px; background: transparent; color: var(--text); font-weight: 600; }
-.floating-title:hover { background: var(--card); }
-.floating-title:focus { border-color: var(--accent); background: var(--field); }
+.floating header {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  gap: 8px;
+  border-bottom: 1px solid transparent;
+}
+.floating-title {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: 0;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+}
+.floating-title:hover {
+  background: var(--card);
+}
+.floating-title:focus {
+  border-color: var(--accent);
+  background: var(--field);
+}
 .floating header button {
   min-width: 28px;
   min-height: 28px;
@@ -1859,13 +1960,59 @@ textarea.input {
   color: var(--muted);
   cursor: pointer;
 }
-.floating header button:hover { color: var(--text); background: var(--card-hover); }
-.floating textarea { flex: 1; min-height: 0; margin-top: 6px; border-color: var(--border); background: var(--field); color: var(--text); }
-.floating textarea::placeholder { color: var(--muted); }
-.floating-status { min-height: 17px; padding-top: 3px; color: var(--muted); }
-.floating.collapsed { padding-bottom: 4px; }
-.floating.collapsed header { border-bottom-color: transparent; }
-.floating-error { color: var(--danger); user-select: text; }
+.floating header button:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+.floating textarea {
+  flex: 1;
+  min-height: 0;
+  margin-top: 6px;
+  border-color: var(--border);
+  background: var(--field);
+  color: var(--text);
+}
+.floating textarea::placeholder {
+  color: var(--muted);
+}
+.floating-status {
+  min-height: 17px;
+  padding-top: 3px;
+  color: var(--muted);
+}
+.floating-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+.floating-tool-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.floating-tool-btn:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+.floating-tool-btn[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.floating.collapsed {
+  padding-bottom: 4px;
+}
+.floating.collapsed header {
+  border-bottom-color: transparent;
+}
+.floating-error {
+  color: var(--danger);
+  user-select: text;
+}
 
 /* Quick capture window (see views/QuickCapture.vue). */
 .quick-capture {

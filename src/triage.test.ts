@@ -79,18 +79,18 @@ describe("advanceAfterAction", () => {
 
   it("keeps cursor stability when a middle item is deleted externally", () => {
     // "b" is deleted by another window before we process "a".
-    const reconciled = reconcileTriage(
-      ["a", "b", "c", "d"],
-      "a",
-      [item("a"), item("c"), item("d")]
-    );
+    const reconciled = reconcileTriage(["a", "b", "c", "d"], "a", [
+      item("a"),
+      item("c"),
+      item("d"),
+    ]);
     expect(reconciled.currentId).toBe("a");
     expect(reconciled.remainingIds).toEqual(["a", "c", "d"]);
-    const second = advanceAfterAction(
-      reconciled.remainingIds,
-      "a",
-      [item("a"), item("c"), item("d")]
-    );
+    const second = advanceAfterAction(reconciled.remainingIds, "a", [
+      item("a"),
+      item("c"),
+      item("d"),
+    ]);
     expect(second.currentId).toBe("c");
     expect(second.remainingIds).toEqual(["c", "d"]);
   });

@@ -17,6 +17,7 @@ import type {
 const s = useGithubStore();
 const todo = useTodoStore();
 const repo = ref("");
+const textQuery = ref("");
 const repoInput = ref<HTMLInputElement | null>(null);
 const busy = ref(false);
 const pendingRemove = ref<string | null>(null);
@@ -55,12 +56,13 @@ function visiblePrs(watch: RepoWatch) {
   const snap = snapFor(watch);
   if (!snap) return [];
   const ignored = new Set(
-    (watch.ignored ?? [])
-      .filter((v) => v.kind === "pr")
-      .map((v) => v.number),
+    (watch.ignored ?? []).filter((v) => v.kind === "pr").map((v) => v.number)
   );
   return snap.pullRequests.filter(
-    (pr) => !ignored.has(pr.number) && passesSignalFilter(watch, pr.signals),
+    (pr) =>
+      !ignored.has(pr.number) &&
+      passesSignalFilter(watch, pr.signals) &&
+      matchesText(watch, pr.title)
   );
 }
 
@@ -68,12 +70,13 @@ function visibleIssues(watch: RepoWatch) {
   const snap = snapFor(watch);
   if (!snap) return [];
   const ignored = new Set(
-    (watch.ignored ?? [])
-      .filter((v) => v.kind === "issue")
-      .map((v) => v.number),
+    (watch.ignored ?? []).filter((v) => v.kind === "issue").map((v) => v.number)
   );
   return snap.issues.filter(
-    (issue) => !ignored.has(issue.number) && passesSignalFilter(watch, issue.signals),
+    (issue) =>
+      !ignored.has(issue.number) &&
+      passesSignalFilter(watch, issue.signals) &&
+      matchesText(watch, issue.title)
   );
 }
 
@@ -81,6 +84,15 @@ function passesSignalFilter(watch: RepoWatch, signals: ActionSignal[]) {
   const active = (watch.signalFilters ?? []) as ActionSignal[];
   if (!active.length) return true;
   return active.some((signal) => signals.includes(signal));
+}
+
+// 纯前端文本过滤：只作用于已加载快照，不发请求、不改 watchlist。
+const normalizedQuery = computed(() => textQuery.value.trim().toLowerCase());
+
+function matchesText(watch: RepoWatch, title: string) {
+  const query = normalizedQuery.value;
+  if (!query) return true;
+  return title.toLowerCase().includes(query) || watch.fullName.toLowerCase().includes(query);
 }
 
 function summary(watch: RepoWatch) {
@@ -97,17 +109,16 @@ function snapshotMeta(watch: RepoWatch) {
   const snap = snapFor(watch);
   if (!snap) return "";
   const fetched = `快照 ${formatTime(snap.fetchedAt)}`;
-  const signals = snap.signalsComputedAt
-    ? `信号 ${formatTime(snap.signalsComputedAt)}`
-    : "旧缓存";
+  const signals = snap.signalsComputedAt ? `信号 ${formatTime(snap.signalsComputedAt)}` : "旧缓存";
   return `${fetched} · ${signals}`;
 }
 
 function activeFilterSummary(watch: RepoWatch) {
-  const names = watch.filters
-    .map((value) => filters.find((item) => item[0] === value)?.[1] ?? value);
+  const names = watch.filters.map(
+    (value) => filters.find((item) => item[0] === value)?.[1] ?? value
+  );
   const signals = (watch.signalFilters ?? []).map(
-    (value) => signalFilters.find((item) => item[0] === value)?.[1] ?? value,
+    (value) => signalFilters.find((item) => item[0] === value)?.[1] ?? value
   );
   return [...names, ...signals].join(" · ");
 }
@@ -146,16 +157,12 @@ async function refreshRepo(repoName: string) {
 }
 
 function toggle(name: string, current: string[], value: string) {
-  const next = current.includes(value)
-    ? current.filter((v) => v !== value)
-    : [...current, value];
+  const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
   void s.setFilters(name, next);
 }
 
 function toggleSignalFilter(name: string, current: string[], value: ActionSignal) {
-  const next = current.includes(value)
-    ? current.filter((v) => v !== value)
-    : [...current, value];
+  const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
   void s.setSignalFilters(name, next);
 }
 
@@ -254,7 +261,7 @@ function convertKey(repoName: string, kind: string, number: number) {
 async function convertToTodo(
   repoName: string,
   kind: "pr" | "issue",
-  item: { number: number; title: string; url: string },
+  item: { number: number; title: string; url: string }
 ) {
   const key = convertKey(repoName, kind, item.number);
   if (convertState[key]?.phase === "saving") return;
@@ -269,9 +276,7 @@ async function convertToTodo(
     });
     convertState[key] = {
       phase: "ok",
-      message: result.alreadyExisted
-        ? `已存在：${result.title}`
-        : `已转为 Todo：${result.title}`,
+      message: result.alreadyExisted ? `已存在：${result.title}` : `已转为 Todo：${result.title}`,
     };
     window.setTimeout(() => {
       if (convertState[key]?.phase === "ok") {
@@ -327,6 +332,15 @@ function convertLabel(key: string) {
       />
       <button class="btn primary" type="button" @click="add">添加仓库</button>
     </div>
+    <div v-if="s.watchlist.length" class="toolbar">
+      <input
+        v-model="textQuery"
+        class="input"
+        type="search"
+        placeholder="按标题 / 仓库名过滤（仅过滤本地快照）"
+        aria-label="按标题或仓库名过滤"
+      />
+    </div>
     <p v-if="s.error" class="error" role="alert">{{ s.error }}</p>
     <ConfirmBar
       v-if="pendingRemove"
@@ -358,9 +372,7 @@ function convertLabel(key: string) {
           :aria-expanded="!watch.collapsed"
           @click="toggleCollapsed(watch)"
         >
-          <span class="gh-chevron" aria-hidden="true">{{
-            watch.collapsed ? "▸" : "▾"
-          }}</span>
+          <span class="gh-chevron" aria-hidden="true">{{ watch.collapsed ? "▸" : "▾" }}</span>
           <h3>{{ watch.fullName }}</h3>
           <span class="snapshot-meta">{{ summary(watch) }}</span>
           <small v-if="snapshotMeta(watch)" class="snapshot-time">{{ snapshotMeta(watch) }}</small>
@@ -374,7 +386,9 @@ function convertLabel(key: string) {
         >
           {{ repoBusy[watch.fullName] ? "刷新中…" : "刷新" }}
         </button>
-        <button class="btn danger" type="button" @click="pendingRemove = watch.fullName">移除</button>
+        <button class="btn danger" type="button" @click="pendingRemove = watch.fullName">
+          移除
+        </button>
       </header>
 
       <template v-if="!watch.collapsed">
@@ -490,24 +504,28 @@ function convertLabel(key: string) {
                 class="btn ghost gh-convert"
                 type="button"
                 title="转为 Todo（收件箱）"
-                :disabled="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'saving'"
+                :disabled="
+                  convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'saving'
+                "
                 @click="convertToTodo(watch.fullName, 'pr', pr)"
               >
-                {{ convertLabel(convertKey(watch.fullName, 'pr', pr.number)) }}
+                {{ convertLabel(convertKey(watch.fullName, "pr", pr.number)) }}
               </button>
               <small
                 v-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'ok'"
                 class="gh-convert-ok"
                 :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
               >
-                {{ convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message }}
+                {{ convertState[convertKey(watch.fullName, "pr", pr.number)]!.message }}
               </small>
               <small
-                v-else-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'"
+                v-else-if="
+                  convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'
+                "
                 class="error gh-convert-error"
                 :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
               >
-                {{ convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message }}
+                {{ convertState[convertKey(watch.fullName, "pr", pr.number)]!.message }}
               </small>
               <button
                 class="btn ghost gh-ignore"
@@ -558,24 +576,31 @@ function convertLabel(key: string) {
                 class="btn ghost gh-convert"
                 type="button"
                 title="转为 Todo（收件箱）"
-                :disabled="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'saving'"
+                :disabled="
+                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase ===
+                  'saving'
+                "
                 @click="convertToTodo(watch.fullName, 'issue', issue)"
               >
-                {{ convertLabel(convertKey(watch.fullName, 'issue', issue.number)) }}
+                {{ convertLabel(convertKey(watch.fullName, "issue", issue.number)) }}
               </button>
               <small
-                v-if="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'ok'"
+                v-if="
+                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'ok'
+                "
                 class="gh-convert-ok"
                 :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
               >
-                {{ convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message }}
+                {{ convertState[convertKey(watch.fullName, "issue", issue.number)]!.message }}
               </small>
               <small
-                v-else-if="convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'error'"
+                v-else-if="
+                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'error'
+                "
                 class="error gh-convert-error"
                 :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
               >
-                {{ convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message }}
+                {{ convertState[convertKey(watch.fullName, "issue", issue.number)]!.message }}
               </small>
               <button
                 class="btn ghost gh-ignore"
@@ -587,9 +612,7 @@ function convertLabel(key: string) {
               </button>
             </div>
           </div>
-          <p v-if="!visibleIssues(watch).length" class="gh-empty">
-            暂无 Issue，可用 #号 手动添加
-          </p>
+          <p v-if="!visibleIssues(watch).length" class="gh-empty">暂无 Issue，可用 #号 手动添加</p>
         </template>
         <p v-else class="gh-empty">尚未拉取数据，点「全部刷新」或添加 #号</p>
       </template>

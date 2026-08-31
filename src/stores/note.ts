@@ -1,40 +1,38 @@
-import { listen } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as api from "../api/note";
+import { EntitySyncer } from "./entitySync";
 import type { Note, NotePatch } from "../types/note";
-
-let ready = false;
 
 function sortNotes(notes: Note[]): Note[] {
   return [...notes].sort(
-    (a, b) =>
-      Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt)
+    (a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt)
   );
 }
 
 export const useNoteStore = defineStore("note", () => {
   const notes = ref<Note[]>([]);
   const error = ref<string | null>(null);
+  let inFlight: Promise<void> | null = null;
 
   const refresh = async () => {
-    try {
-      notes.value = await api.list();
-      error.value = null;
-    } catch (e) {
-      error.value = String(e);
-    }
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        notes.value = await api.list();
+        error.value = null;
+      } catch (e) {
+        error.value = String(e);
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
   };
 
-  const init = async () => {
-    if (!ready) {
-      ready = true;
-      await listen<{ domain: string }>("entity-changed", (e) => {
-        if (e.payload.domain === "note") void refresh();
-      });
-    }
-    await refresh();
-  };
+  const syncer = new EntitySyncer((domain) => domain === "note", refresh);
+
+  const init = () => syncer.init();
 
   const upsert = (note: Note) => {
     const index = notes.value.findIndex((v) => v.id === note.id);

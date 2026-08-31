@@ -38,9 +38,8 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   };
 
-  const appliesToWindow = (
-    key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity"
-  ) => (key === "floatingNoteGlassOpacity") === isFloatingWindow;
+  const appliesToWindow = (key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity") =>
+    (key === "floatingNoteGlassOpacity") === isFloatingWindow;
 
   const init = () => {
     if (initPromise) return initPromise;

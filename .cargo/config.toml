@@ -1,0 +1,8 @@
+# ts-rs writes generated frontend bindings here during `cargo test`
+# (`#[derive(TS)] #[ts(export)]`). Keep the generated output committed and
+# let CI fail when it drifts from the Rust models.
+[env]
+TS_RS_EXPORT_DIR = { value = "src/types/generated", relative = true }
+# serde_json emits u64/i64 as regular JSON numbers, so the frontend consumes
+# `number`, not `bigint`.
+TS_RS_LARGE_INT = "number"

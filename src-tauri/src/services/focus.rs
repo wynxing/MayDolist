@@ -763,23 +763,20 @@ mod tests {
         use crate::services::Services;
         use crate::storage::Storage;
 
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-focus-fail-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
         let services = Services::new(storage.clone());
 
         // Sabotage the todos directory (a file blocks read_dir) so only the
         // todo section fails; note and github must stay ready.
-        std::fs::remove_dir_all(dir.join("todos")).unwrap();
-        std::fs::write(dir.join("todos"), "not a directory").unwrap();
+        std::fs::remove_dir_all(tmp.path().join("todos")).unwrap();
+        std::fs::write(tmp.path().join("todos"), "not a directory").unwrap();
         let overview = services.focus.overview();
 
         assert_eq!(overview.todo.state, FocusSectionState::Error);
         assert!(overview.todo.error.is_some());
         assert_eq!(overview.note.state, FocusSectionState::Ready);
         assert_eq!(overview.github.state, FocusSectionState::Ready);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -787,10 +784,8 @@ mod tests {
         use crate::services::Services;
         use crate::storage::Storage;
 
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-focus-data-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
         let services = Services::new(storage.clone());
 
         let inbox = services.todo.ensure_inbox().unwrap();
@@ -880,6 +875,5 @@ mod tests {
         assert!(overview.note.items[0].pinned);
         assert_eq!(overview.github.items.len(), 1);
         assert_eq!(overview.github.items[0].number, 7);
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -18,6 +18,11 @@ pub const DEFAULT_SUBDIRECTORIES: &[&str] = &["notes", "todos", "github", "githu
 pub struct Storage {
     data_dir: Mutex<PathBuf>,
     lock: Mutex<()>,
+    /// In-memory copy of `config.json`. Background loops (reminders, GitHub
+    /// polling, hot corner) read the config on every tick; the cache spares
+    /// the disk read + parse. Refreshed by every `save_config`, dropped when
+    /// the file is swapped from outside (import / migrate).
+    config_cache: Mutex<Option<AppConfig>>,
 }
 
 impl Storage {
@@ -27,6 +32,7 @@ impl Storage {
         let storage = Self {
             data_dir: Mutex::new(resolve_data_dir()),
             lock: Mutex::new(()),
+            config_cache: Mutex::new(None),
         };
         storage.ensure_dirs()?;
         Ok(storage)
@@ -37,6 +43,7 @@ impl Storage {
         let storage = Self {
             data_dir: Mutex::new(dir.as_ref().to_path_buf()),
             lock: Mutex::new(()),
+            config_cache: Mutex::new(None),
         };
         storage.ensure_dirs()?;
         Ok(storage)
@@ -61,7 +68,28 @@ impl Storage {
 
     /// Load the config, creating the default file on first run. A corrupt
     /// config is quarantined (renamed aside) and rebuilt from defaults.
+    /// Served from the in-memory cache after the first successful load.
     pub fn load_config(&self) -> AppResult<AppConfig> {
+        let cached = self
+            .config_cache
+            .lock()
+            .map_err(|_| AppError::Internal("config cache lock poisoned".into()))?
+            .clone();
+        if let Some(config) = cached {
+            return Ok(config);
+        }
+        let config = self.load_config_from_disk()?;
+        let mut guard = self
+            .config_cache
+            .lock()
+            .map_err(|_| AppError::Internal("config cache lock poisoned".into()))?;
+        if guard.is_none() {
+            *guard = Some(config.clone());
+        }
+        Ok(config)
+    }
+
+    fn load_config_from_disk(&self) -> AppResult<AppConfig> {
         let path = self.config_path();
         match self.read_json::<AppConfig>(&path) {
             Ok(Some(mut config)) => {
@@ -101,7 +129,26 @@ impl Storage {
     }
 
     pub fn save_config(&self, config: &AppConfig) -> AppResult<()> {
-        self.write_json(&self.config_path(), config)
+        self.write_json(&self.config_path(), config)?;
+        // Cache what a disk reload would produce: an out-of-range value gets
+        // clamped by sanitize on load, so mirror that here instead of serving
+        // the raw written value.
+        let mut cached = config.clone();
+        cached.sanitize();
+        let mut guard = self
+            .config_cache
+            .lock()
+            .map_err(|_| AppError::Internal("config cache lock poisoned".into()))?;
+        *guard = Some(cached);
+        Ok(())
+    }
+
+    /// Drop the cached config. Required whenever `config.json` is replaced
+    /// without going through `save_config` (backup import, data dir migrate).
+    pub fn invalidate_config_cache(&self) {
+        if let Ok(mut guard) = self.config_cache.lock() {
+            *guard = None;
+        }
     }
 
     pub fn list_json<T: DeserializeOwned>(&self, subdir: &str) -> AppResult<Vec<T>> {
@@ -180,6 +227,9 @@ impl Storage {
             .data_dir
             .lock()
             .map_err(|_| AppError::Internal("data dir lock poisoned".into()))? = target.clone();
+        // The moved tree carries its own config.json; the cached copy refers
+        // to the old directory.
+        self.invalidate_config_cache();
         write_bootstrap(&target)?;
         Ok(())
     }
@@ -245,6 +295,8 @@ impl Storage {
         // Success: drop the aside copies (the caller made a full ZIP backup
         // before the swap).
         fs::remove_dir_all(&rollback).ok();
+        // The swap replaced config.json behind the cache's back.
+        self.invalidate_config_cache();
         Ok(())
     }
 
@@ -421,19 +473,18 @@ mod tests {
     use crate::models::config::{CONFIG_SCHEMA_VERSION, GLASS_OPACITY_MAX, GLASS_OPACITY_MIN};
     use std::sync::OnceLock;
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "maydolist-storage-{}-{}",
-            tag,
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(tag: &str) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::Builder::new()
+            .prefix(&format!("maydolist-storage-{tag}-"))
+            .tempdir()
+            .unwrap();
+        let dir = tmp.path().to_path_buf();
+        (tmp, dir)
     }
 
     #[test]
     fn first_load_creates_default_config_and_dirs() {
-        let dir = temp_dir("first-load");
+        let (_tmp, dir) = temp_dir("first-load");
         let storage = Storage::with_dir(&dir).unwrap();
         let config = storage.load_config().unwrap();
         assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
@@ -442,12 +493,11 @@ mod tests {
         for sub in DEFAULT_SUBDIRECTORIES {
             assert!(dir.join(sub).is_dir(), "missing dir: {sub}");
         }
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn atomic_write_roundtrip() {
-        let dir = temp_dir("roundtrip");
+        let (_tmp, dir) = temp_dir("roundtrip");
         let storage = Storage::with_dir(&dir).unwrap();
         let config = AppConfig {
             theme: "light".into(),
@@ -458,12 +508,11 @@ mod tests {
         assert_eq!(loaded.theme, "light");
         // No temp file left behind.
         assert!(!dir.join("config.json.tmp").exists());
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn write_failure_preserves_original() {
-        let dir = temp_dir("write-fail");
+        let (_tmp, dir) = temp_dir("write-fail");
         let storage = Storage::with_dir(&dir).unwrap();
         let original = "{\"schemaVersion\":1,\"dataDir\":null,\"hotCorner\":\"top-right\",\"hotkey\":\"Ctrl+Alt+M\",\"theme\":\"original\",\"githubRefreshIntervalMinutes\":30}";
         fs::write(storage.config_path(), original).unwrap();
@@ -476,12 +525,11 @@ mod tests {
         assert!(storage.save_config(&config).is_err());
         let after = fs::read_to_string(storage.config_path()).unwrap();
         assert_eq!(after, original);
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn concurrent_writes_serialize() {
-        let dir = temp_dir("concurrent");
+        let (_tmp, dir) = temp_dir("concurrent");
         let storage = std::sync::Arc::new(Storage::with_dir(&dir).unwrap());
         let mut handles = Vec::new();
         for i in 0..8 {
@@ -504,12 +552,11 @@ mod tests {
             loaded.theme
         );
         assert!(!dir.join("config.json.tmp").exists());
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn corrupt_config_is_quarantined_and_rebuilt() {
-        let dir = temp_dir("corrupt");
+        let (_tmp, dir) = temp_dir("corrupt");
         let storage = Storage::with_dir(&dir).unwrap();
         fs::write(storage.config_path(), "{not valid json").unwrap();
         let config = storage.load_config().unwrap();
@@ -525,24 +572,44 @@ mod tests {
             })
             .collect();
         assert_eq!(backups.len(), 1, "corrupt file should be quarantined");
-        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_cache_serves_saved_value_until_invalidated() {
+        let (_tmp, dir) = temp_dir("config-cache");
+        let storage = Storage::with_dir(&dir).unwrap();
+        let mut config = storage.load_config().unwrap();
+        config.triage_later_days = 9;
+        storage.save_config(&config).unwrap();
+        // Overwrite the file behind the cache's back: reads keep serving the
+        // cached (saved) value until the cache is explicitly dropped.
+        let mut external = config.clone();
+        external.triage_later_days = 1;
+        fs::write(
+            storage.config_path(),
+            serde_json::to_vec_pretty(&external).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(storage.load_config().unwrap().triage_later_days, 9);
+        storage.invalidate_config_cache();
+        assert_eq!(storage.load_config().unwrap().triage_later_days, 1);
     }
 
     #[test]
     fn resolve_data_dir_prefers_env() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-        let custom = std::env::temp_dir().join("maydolist-env-test");
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().join("maydolist-env-test");
         std::env::set_var("MAYDOLIST_DATA_DIR", &custom);
         assert_eq!(resolve_data_dir(), custom);
         std::env::remove_var("MAYDOLIST_DATA_DIR");
         assert_ne!(resolve_data_dir(), custom);
-        fs::remove_dir_all(&custom).ok();
     }
 
     #[test]
     fn glass_opacity_fields_roundtrip() {
-        let dir = temp_dir("glass-roundtrip");
+        let (_tmp, dir) = temp_dir("glass-roundtrip");
         let storage = Storage::with_dir(&dir).unwrap();
         let config = AppConfig {
             main_window_glass_opacity: 0.62,
@@ -553,31 +620,35 @@ mod tests {
         let loaded = storage.load_config().unwrap();
         assert_eq!(loaded.main_window_glass_opacity, 0.62);
         assert_eq!(loaded.floating_note_glass_opacity, 0.44);
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn out_of_range_opacity_is_clamped_on_load() {
-        let dir = temp_dir("glass-clamp");
+        let (_tmp, dir) = temp_dir("glass-clamp");
         let storage = Storage::with_dir(&dir).unwrap();
         let config = AppConfig {
             main_window_glass_opacity: 0.05,
             floating_note_glass_opacity: 2.0,
             ..Default::default()
         };
-        storage.save_config(&config).unwrap();
+        // Simulate an externally written (legacy / hand-edited) config file.
+        fs::write(
+            storage.config_path(),
+            serde_json::to_vec_pretty(&config).unwrap(),
+        )
+        .unwrap();
+        storage.invalidate_config_cache();
         let loaded = storage.load_config().unwrap();
         assert_eq!(loaded.main_window_glass_opacity, GLASS_OPACITY_MIN);
         assert_eq!(loaded.floating_note_glass_opacity, GLASS_OPACITY_MAX);
         let persisted: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
         assert_eq!(persisted["mainWindowGlassOpacity"], GLASS_OPACITY_MIN);
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn old_schema_config_is_upgraded_without_losing_settings() {
-        let dir = temp_dir("old-schema");
+        let (_tmp, dir) = temp_dir("old-schema");
         let storage = Storage::with_dir(&dir).unwrap();
         let legacy = r#"{
             "schemaVersion": 1,
@@ -615,12 +686,11 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(storage.config_path()).unwrap()).unwrap();
         assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
         assert!(persisted.get("mainWindowGlassOpacity").is_some());
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn replace_domain_swaps_entries_atomically() {
-        let dir = temp_dir("replace-ok");
+        let (_tmp, dir) = temp_dir("replace-ok");
         let storage = Storage::with_dir(&dir).unwrap();
         storage
             .save_config(&AppConfig {
@@ -658,12 +728,11 @@ mod tests {
             .filter(|n| n.contains("rollback"))
             .collect();
         assert!(leftovers.is_empty(), "rollback dir must be removed");
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn replace_domain_failure_keeps_original_data() {
-        let dir = temp_dir("replace-fail");
+        let (_tmp, dir) = temp_dir("replace-fail");
         let storage = Storage::with_dir(&dir).unwrap();
         storage
             .save_config(&AppConfig {
@@ -693,6 +762,5 @@ mod tests {
                 .contains("old"),
             "original config must be untouched"
         );
-        fs::remove_dir_all(&dir).ok();
     }
 }

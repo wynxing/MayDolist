@@ -51,6 +51,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check frontend formatting
+        run: pnpm format:check
+
       - name: Build frontend
         run: pnpm build
 
@@ -65,3 +68,8 @@ jobs:
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Check ts-rs bindings are up to date
+        run: |
+          git diff --exit-code src/types/generated
+          if ($LASTEXITCODE -ne 0) { Write-Error "src/types/generated is stale; run pnpm gen:types and commit" }

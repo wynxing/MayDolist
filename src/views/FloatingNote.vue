@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api/note";
+import { NOTE_COLORS, noteColorId } from "../noteColor";
 import { useSettingsStore } from "../stores/settings";
 
 const id = new URLSearchParams(location.search).get("note")!;
@@ -43,6 +44,8 @@ watch(
           note.value.content,
           note.value.collapsed,
           note.value.alwaysOnTop,
+          note.value.color,
+          note.value.pinned,
         ]
       : null,
   () => {
@@ -62,6 +65,8 @@ async function save() {
     content: note.value.content,
     collapsed: note.value.collapsed,
     alwaysOnTop: note.value.alwaysOnTop,
+    color: note.value.color,
+    pinned: note.value.pinned,
   };
   status.value = "保存中…";
   const run = (async () => {
@@ -98,9 +103,24 @@ async function dock() {
 async function toggle() {
   note.value.collapsed = !note.value.collapsed;
   const { LogicalSize } = await import("@tauri-apps/api/dpi");
-  await getCurrentWindow().setSize(
-    new LogicalSize(360, note.value.collapsed ? 56 : 280)
-  );
+  await getCurrentWindow().setSize(new LogicalSize(360, note.value.collapsed ? 56 : 280));
+}
+
+function setColor(color: string) {
+  if (!note.value) return;
+  note.value.color = color;
+}
+
+function togglePin() {
+  if (!note.value) return;
+  note.value.pinned = !note.value.pinned;
+}
+
+async function toggleAlwaysOnTop() {
+  if (!note.value) return;
+  note.value.alwaysOnTop = !note.value.alwaysOnTop;
+  // Persisted via the debounced autosave; apply to this window immediately.
+  await getCurrentWindow().setAlwaysOnTop(note.value.alwaysOnTop);
 }
 </script>
 <template>
@@ -113,7 +133,12 @@ async function toggle() {
     </header>
     <small class="floating-error">{{ loadError }}</small>
   </div>
-  <div v-else-if="note" class="floating" :class="{ collapsed: note.collapsed }" :data-color="note.color || 'blue'">
+  <div
+    v-else-if="note"
+    class="floating"
+    :class="{ collapsed: note.collapsed }"
+    :data-color="note.color || 'blue'"
+  >
     <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
     <header>
       <input v-model="note.title" class="floating-title" aria-label="便签标题" />
@@ -129,6 +154,39 @@ async function toggle() {
       class="input"
       aria-label="便签内容"
     ></textarea>
+    <div v-if="!note.collapsed" class="floating-toolbar">
+      <div class="note-color-dots" role="group" aria-label="便签颜色">
+        <button
+          v-for="color in NOTE_COLORS"
+          :key="color.id"
+          class="note-color-dot"
+          :class="{ active: noteColorId(note.color) === color.id }"
+          :data-color="color.id"
+          type="button"
+          :title="color.label"
+          :aria-label="`颜色：${color.label}`"
+          @click="setColor(color.id)"
+        />
+      </div>
+      <button
+        class="floating-tool-btn"
+        type="button"
+        :aria-pressed="note.pinned"
+        :title="note.pinned ? '取消置顶' : '置顶'"
+        @click="togglePin"
+      >
+        {{ note.pinned ? "已置顶" : "置顶" }}
+      </button>
+      <button
+        class="floating-tool-btn"
+        type="button"
+        :aria-pressed="note.alwaysOnTop"
+        :title="note.alwaysOnTop ? '取消窗口置顶' : '窗口置顶最前'"
+        @click="toggleAlwaysOnTop"
+      >
+        {{ note.alwaysOnTop ? "最前✓" : "最前" }}
+      </button>
+    </div>
     <small v-if="!note.collapsed" class="floating-status">{{ status }}</small>
   </div>
 </template>

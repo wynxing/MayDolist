@@ -9,7 +9,5 @@ export const NOTE_COLORS = [
 export type NoteColorId = (typeof NOTE_COLORS)[number]["id"];
 
 export function noteColorId(value: string | null | undefined): NoteColorId {
-  return NOTE_COLORS.some((color) => color.id === value)
-    ? (value as NoteColorId)
-    : "blue";
+  return NOTE_COLORS.some((color) => color.id === value) ? (value as NoteColorId) : "blue";
 }

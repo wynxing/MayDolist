@@ -1,19 +1,12 @@
 import { call } from "./index";
-import type {
-  BackupInfo,
-  ExportInfo,
-  ImportInfo,
-  PackagePreview,
-} from "../types/backup";
+import type { BackupInfo, ExportInfo, ImportInfo, PackagePreview } from "../types/backup";
 
 export const exportData = (target: string, includeCache: boolean) =>
   call<ExportInfo>("backup_export", { target, includeCache });
 
-export const inspectPackage = (path: string) =>
-  call<PackagePreview>("backup_inspect", { path });
+export const inspectPackage = (path: string) => call<PackagePreview>("backup_inspect", { path });
 
-export const importPackage = (path: string) =>
-  call<ImportInfo>("backup_import", { path });
+export const importPackage = (path: string) => call<ImportInfo>("backup_import", { path });
 
 export const createBackup = () => call<BackupInfo>("backup_create");
 

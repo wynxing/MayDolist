@@ -1,51 +1,63 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import ConfirmBar from "../components/ConfirmBar.vue";
 import EmptyState from "../components/EmptyState.vue";
 import PageHeader from "../components/PageHeader.vue";
+import TriageMode from "../components/TriageMode.vue";
+import TodoListCard from "../components/TodoListCard.vue";
 import { open } from "../api/github";
-import type { TodoScheduleInput } from "../api/todo";
 import { useTodoStore } from "../stores/todo";
-import {
-  advanceAfterAction,
-  enterTriage,
-  isTriageDone,
-  reconcileTriage,
-  triageDueDate,
-  triageKeyToAction,
-  triagePending,
-  triageRemainingCount,
-  type TriageAction,
-} from "../triage";
-import type { RepeatRule, TodoItem, TodoList, TodoSource } from "../types/todo";
+import { triagePending } from "../triage";
+import { isHttpUrl } from "../todoFormat";
+import type { TodoItem, TodoList } from "../types/todo";
 
 const store = useTodoStore();
 const actionError = ref("");
 const newList = ref("");
-const drafts = ref<Record<string, string>>({});
-const completedOpen = ref<Record<string, boolean>>({});
 const editingItemId = ref<string | null>(null);
 const expandedItemId = ref<string | null>(null);
 const expandedItemListId = ref<string | null>(null);
 const expandedItemCompleted = ref<boolean | null>(null);
 const editingListId = ref<string | null>(null);
-const editDraft = ref("");
 const dragListId = ref<string | null>(null);
 const dropListId = ref<string | null>(null);
 const dragItem = ref<{ from: string; id: string } | null>(null);
 const dropItemId = ref<string | null>(null);
 const pendingConfirm = ref<{ kind: "list" | "item"; id: string; title: string } | null>(null);
 const completingIds = ref<Set<string>>(new Set());
+const triageActive = ref(false);
 
 const hasLists = computed(() => store.lists.length > 0);
 
+// Memoized pending/completed partition: built once per store.lists change
+// instead of re-filtering on every template function call.
+const partitionedItems = computed(() => {
+  const map = new Map<string, { pending: TodoItem[]; completed: TodoItem[] }>();
+  for (const list of store.lists) {
+    map.set(list.id, {
+      pending: list.items.filter((item) => !item.completed),
+      completed: list.items.filter((item) => item.completed),
+    });
+  }
+  return map;
+});
+
+const emptyItems: TodoItem[] = [];
+
 function pendingItems(list: TodoList) {
-  return list.items.filter((item) => !item.completed);
+  return partitionedItems.value.get(list.id)?.pending ?? emptyItems;
 }
 
 function completedItems(list: TodoList) {
-  return list.items.filter((item) => item.completed);
+  return partitionedItems.value.get(list.id)?.completed ?? emptyItems;
 }
+
+const inboxList = computed(() => {
+  const byKind = store.lists.find((list) => list.kind === "inbox");
+  if (byKind) return byKind;
+  return store.lists.find((list) => list.title === "收件箱") ?? null;
+});
+const inboxPending = computed(() => triagePending(inboxList.value?.items ?? []));
 
 function closeItemDetails(itemId?: string) {
   if (itemId && expandedItemId.value !== itemId) return;
@@ -71,56 +83,36 @@ async function addList() {
   newList.value = "";
 }
 
-async function addItem(listId: string) {
-  const title = drafts.value[listId]?.trim();
-  if (!title) return;
-  await store.createItem(listId, title);
-  drafts.value[listId] = "";
+function findItem(itemId: string) {
+  for (const list of store.lists) {
+    const item = list.items.find((candidate) => candidate.id === itemId);
+    if (item) return item;
+  }
+  return null;
 }
 
-function submitOnEnter(event: KeyboardEvent, action: () => void) {
-  if (!event.isComposing) action();
-}
-
-function startItemEdit(item: TodoItem) {
-  editingItemId.value = item.id;
-  editDraft.value = item.title;
-}
-
-async function commitItemEdit(item: TodoItem) {
-  if (editingItemId.value !== item.id) return;
-  const title = editDraft.value.trim();
+async function commitItemEdit(itemId: string, title: string) {
+  if (editingItemId.value !== itemId) return;
   editingItemId.value = null;
-  if (title && title !== item.title) await store.renameItem(item.id, title);
-}
-
-function cancelItemEdit() {
-  editingItemId.value = null;
-  editDraft.value = "";
+  const item = findItem(itemId);
+  if (item && title && title !== item.title) await store.renameItem(itemId, title);
 }
 
 function startListEdit(list: TodoList) {
   editingListId.value = list.id;
-  editDraft.value = list.title;
 }
 
-async function commitListEdit(list: TodoList) {
+async function commitListEdit(list: TodoList, title: string) {
   if (editingListId.value !== list.id) return;
-  const title = editDraft.value.trim();
   editingListId.value = null;
   if (title && title !== list.title) await store.updateList(list.id, { title });
 }
 
-function cancelListEdit() {
-  editingListId.value = null;
-  editDraft.value = "";
-}
-
-async function deleteList(list: TodoList) {
+function deleteList(list: TodoList) {
   pendingConfirm.value = { kind: "list", id: list.id, title: list.title };
 }
 
-async function deleteItem(item: TodoItem) {
+function deleteItem(item: TodoItem) {
   pendingConfirm.value = { kind: "item", id: item.id, title: item.title };
 }
 
@@ -151,167 +143,15 @@ async function toggleItemCompleted(item: TodoItem) {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Inbox triage mode (#28): a pure view mode that shows one pending
- * inbox item at a time. All actions reuse existing commands / services
- * (todo_update_item / todo_move_item / todo_soft_delete), so no new
- * write path and no new persisted field exists.
- * ------------------------------------------------------------------ */
-const inboxList = computed(() => {
-  const byKind = store.lists.find((list) => list.kind === "inbox");
-  if (byKind) return byKind;
-  return store.lists.find((list) => list.title === "收件箱") ?? null;
-});
-const inboxPending = computed(() => triagePending(inboxList.value?.items ?? []));
-
-const triageActive = ref(false);
-const triageTotalIds = ref<string[]>([]);
-const triageRemainingIds = ref<string[]>([]);
-const triageCurrentId = ref<string | null>(null);
-const triageError = ref("");
-const triageBusy = ref(false);
-const movePickerOpen = ref(false);
-const moveTargetListId = ref("");
-const triageCardEl = ref<HTMLElement | null>(null);
-
-const triageCurrent = computed(() => {
-  if (!triageCurrentId.value) return null;
-  return inboxPending.value.find((item) => item.id === triageCurrentId.value) ?? null;
-});
-const triageRemaining = computed(() =>
-  triageRemainingCount(triageRemainingIds.value, inboxPending.value)
-);
-const triageDone = computed(() => isTriageDone(triageRemainingIds.value, inboxPending.value));
-const triageProgress = computed(() => {
-  if (triageTotalIds.value.length === 0) return 100;
-  return Math.round((1 - triageRemaining.value / triageTotalIds.value.length) * 100);
-});
-const triageMoveTargets = computed(() =>
-  store.lists.filter((list) => list.id !== inboxList.value?.id)
-);
-
-function repeatLabel(rule: RepeatRule) {
-  switch (rule) {
-    case "daily":
-      return "每天";
-    case "weekly":
-      return "每周";
-    case "biweekly":
-      return "每两周";
-    case "monthly":
-      return "每月";
-  }
-}
-
-function startTriage() {
-  if (!inboxList.value) return;
-  const state = enterTriage(inboxPending.value);
-  triageTotalIds.value = [...state.remainingIds];
-  triageRemainingIds.value = state.remainingIds;
-  triageCurrentId.value = state.currentId;
-  triageError.value = "";
-  triageActive.value = true;
-  void nextTick(() => triageCardEl.value?.focus());
-}
-
-function exitTriage() {
-  triageActive.value = false;
-  triageRemainingIds.value = [];
-  triageCurrentId.value = null;
-  movePickerOpen.value = false;
-  triageError.value = "";
-}
-
-function advanceTriage() {
-  const state = advanceAfterAction(
-    triageRemainingIds.value,
-    triageCurrentId.value,
-    inboxPending.value
-  );
-  triageRemainingIds.value = state.remainingIds;
-  triageCurrentId.value = state.currentId;
-  void nextTick(() => triageCardEl.value?.focus());
-}
-
-async function runTriageAction(action: TriageAction) {
-  if (!triageCurrent.value || triageBusy.value) return;
-  const item = triageCurrent.value;
-  triageError.value = "";
-  if (action === "move") {
-    moveTargetListId.value = triageMoveTargets.value[0]?.id ?? "";
-    movePickerOpen.value = true;
-    return;
-  }
-  triageBusy.value = true;
+async function openSource(item: TodoItem) {
+  if (!item.source || !isHttpUrl(item.source.url)) return;
+  actionError.value = "";
   try {
-    if (action === "today" || action === "later") {
-      const schedule = scheduleOf(item);
-      schedule.dueDate = triageDueDate(new Date(), action === "today" ? 0 : 3);
-      await store.patchItem(item.id, { schedule });
-    } else if (action === "complete") {
-      await store.patchItem(item.id, { completed: true });
-    } else if (action === "delete") {
-      await store.softDelete(item.id);
-    }
-    advanceTriage();
+    await open(item.source.url);
   } catch (err) {
-    // 写盘失败：停留在当前条目并显示错误，不静默丢失。
-    triageError.value = String(err);
-  } finally {
-    triageBusy.value = false;
+    actionError.value = String(err);
   }
 }
-
-async function confirmMove() {
-  const item = triageCurrent.value;
-  const target = store.lists.find((list) => list.id === moveTargetListId.value);
-  if (!item || !target || triageBusy.value) return;
-  triageError.value = "";
-  triageBusy.value = true;
-  try {
-    await store.moveItem(item.id, target.id, target.items.length);
-    movePickerOpen.value = false;
-    advanceTriage();
-  } catch (err) {
-    triageError.value = String(err);
-  } finally {
-    triageBusy.value = false;
-  }
-}
-
-function onTriageKeydown(event: KeyboardEvent) {
-  if (!triageActive.value) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    if (movePickerOpen.value) {
-      movePickerOpen.value = false;
-    } else {
-      exitTriage();
-    }
-    return;
-  }
-  if (movePickerOpen.value) return;
-  const action = triageKeyToAction(
-    event.key,
-    event.isComposing || event.keyCode === 229,
-    event.keyCode
-  );
-  if (!action) return;
-  event.preventDefault();
-  void runTriageAction(action);
-}
-
-// 处理过程中列表被其他窗口修改时，光标与计数自动校正（基于稳定 id）。
-watch(inboxPending, () => {
-  if (!triageActive.value) return;
-  const state = reconcileTriage(
-    triageRemainingIds.value,
-    triageCurrentId.value,
-    inboxPending.value
-  );
-  triageRemainingIds.value = state.remainingIds;
-  triageCurrentId.value = state.currentId;
-});
 
 // If another window removes or changes the completion state of the expanded item,
 // close stale details. Already-completed items can still be expanded normally.
@@ -338,146 +178,7 @@ watch(
 
 onMounted(() => {
   store.init();
-  window.addEventListener("keydown", onTriageKeydown);
 });
-onBeforeUnmount(() => window.removeEventListener("keydown", onTriageKeydown));
-
-function sourceLabel(source: TodoSource) {
-  const kind =
-    source.type === "github-pr" ? "PR" : source.type === "github-issue" ? "Issue" : source.type;
-  return `${kind} ${source.repo}#${source.number}`;
-}
-
-function githubSyncLabel(item: TodoItem) {
-  const sync = item.githubSync;
-  if (!sync) return "";
-  if (sync.syncError) return "同步失败";
-  if (sync.state === "merged") return sync.autoCompletionUndoneAt ? "已撤销自动完成" : "已合并";
-  if (sync.state === "closed") return sync.autoCompletionUndoneAt ? "已撤销自动完成" : "已关闭";
-  if (sync.state === "unknown") return "状态未知";
-  if (item.completed && sync.autoCompletedAt) return "来源已重新打开";
-  return "";
-}
-
-function githubSyncClass(item: TodoItem) {
-  const sync = item.githubSync;
-  if (!sync) return "";
-  if (sync.syncError || sync.state === "unknown") return "error";
-  if (sync.state === "merged") return sync.autoCompletionUndoneAt ? "reopened" : "merged";
-  if (sync.state === "closed") return sync.autoCompletionUndoneAt ? "reopened" : "closed";
-  if (item.completed && sync.autoCompletedAt) return "reopened";
-  return "";
-}
-
-function githubSyncTitle(item: TodoItem) {
-  const sync = item.githubSync;
-  if (!sync) return "";
-  if (sync.syncError) return `GitHub 来源同步失败：${sync.syncError}`;
-  if (sync.state === "merged") {
-    if (sync.autoCompletionUndoneAt) return "已撤销自动完成，来源仍处于已合并状态";
-    return sync.autoCompletedAt ? "来源已合并，待办已自动完成" : "来源已合并";
-  }
-  if (sync.state === "closed") {
-    if (sync.autoCompletionUndoneAt) return "已撤销自动完成，来源仍处于已关闭状态";
-    return sync.autoCompletedAt ? "来源已关闭，待办已自动完成" : "来源已关闭";
-  }
-  if (item.completed && sync.autoCompletedAt) return "来源已重新打开，待办保持已完成";
-  return "GitHub 来源已同步";
-}
-
-function isHttpUrl(url: string) {
-  return /^https?:\/\//i.test(url);
-}
-
-function pad2(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function localDateValue(value: string | null | undefined) {
-  if (!value) return "";
-  const d = new Date(value.length === 10 ? `${value}T00:00:00` : value);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function localDateTimeValue(value: string | null | undefined) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
-    d.getHours()
-  )}:${pad2(d.getMinutes())}`;
-}
-
-function shortDateValue(value: string | null | undefined) {
-  const local = localDateValue(value);
-  if (!local) return "";
-  const [, month, day] = local.split("-");
-  return `${Number(month)}/${Number(day)}`;
-}
-
-function shortDateTimeValue(value: string | null | undefined) {
-  const local = localDateTimeValue(value);
-  if (!local) return "";
-  const [date, time] = local.split("T");
-  return `${shortDateValue(date)} ${time}`;
-}
-
-function scheduleSummaries(item: TodoItem) {
-  const summaries: string[] = [];
-  if (item.dueDate) summaries.push(`到期 ${shortDateValue(item.dueDate)}`);
-  if (item.remindAt) summaries.push(`提醒 ${shortDateTimeValue(item.remindAt)}`);
-  if (item.repeat) summaries.push(`重复 ${repeatLabel(item.repeat)}`);
-  return summaries;
-}
-
-function scheduleOf(item: TodoItem): TodoScheduleInput {
-  return {
-    dueDate: item.dueDate ?? null,
-    remindAt: item.remindAt ?? null,
-    repeat: item.repeat ?? null,
-    repeatUntil: item.repeatUntil ?? null,
-  };
-}
-
-async function patchSchedule(item: TodoItem, schedule: TodoScheduleInput) {
-  actionError.value = "";
-  try {
-    await store.patchItem(item.id, { schedule });
-  } catch (err) {
-    actionError.value = String(err);
-  }
-}
-
-async function setDueDate(item: TodoItem, value: string) {
-  const schedule = scheduleOf(item);
-  schedule.dueDate = value || null;
-  if (!schedule.dueDate) schedule.remindAt = null;
-  await patchSchedule(item, schedule);
-}
-
-async function setRemindAt(item: TodoItem, value: string) {
-  const schedule = scheduleOf(item);
-  schedule.remindAt = value ? new Date(value).toISOString() : null;
-  await patchSchedule(item, schedule);
-}
-
-async function setRepeat(item: TodoItem, value: string) {
-  const schedule = scheduleOf(item);
-  schedule.repeat = (value || null) as RepeatRule | null;
-  if (!schedule.repeat) schedule.repeatUntil = null;
-  await patchSchedule(item, schedule);
-}
-
-async function openSource(item: TodoItem) {
-  if (!item.source || !isHttpUrl(item.source.url)) return;
-  actionError.value = "";
-  try {
-    await open(item.source.url);
-  } catch (err) {
-    actionError.value = String(err);
-  }
-}
 
 async function moveList(id: string, delta: number) {
   const ids = store.lists.map((list) => list.id);
@@ -604,7 +305,7 @@ function onItemDragEnd() {
             type="button"
             :disabled="inboxPending.length === 0"
             title="进入收件箱逐条处理模式"
-            @click="startTriage"
+            @click="triageActive = true"
           >
             处理模式
           </button>
@@ -614,9 +315,11 @@ function onItemDragEnd() {
 
     <ConfirmBar
       v-if="pendingConfirm"
-      :message="pendingConfirm.kind === 'list'
-        ? `将清单“${pendingConfirm.title}”移入回收站？`
-        : `将待办“${pendingConfirm.title}”移入回收站？`"
+      :message="
+        pendingConfirm.kind === 'list'
+          ? `将清单“${pendingConfirm.title}”移入回收站？`
+          : `将待办“${pendingConfirm.title}”移入回收站？`
+      "
       confirm-label="移入回收站"
       danger
       @confirm="confirmPending"
@@ -626,449 +329,51 @@ function onItemDragEnd() {
     <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
     <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
 
-    <section v-if="triageActive" class="triage" aria-label="收件箱处理模式">
-      <header class="triage-header">
-        <div class="triage-heading">
-          <h2>收件箱处理模式</h2>
-          <p>剩余 {{ triageRemaining }} 条 · 共 {{ triageTotalIds.length }} 条</p>
-        </div>
-        <button class="btn ghost compact" type="button" @click="exitTriage">退出（Esc）</button>
-      </header>
-
-      <div
-        class="triage-progress"
-        role="progressbar"
-        aria-label="处理进度"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        :aria-valuenow="triageProgress"
-      >
-        <div class="triage-progress-fill" :style="{ width: `${triageProgress}%` }"></div>
-      </div>
-
-      <p v-if="triageError" class="error" role="alert">{{ triageError }}</p>
-      <p v-if="!inboxList" class="error" role="alert">收件箱已不存在，已退出处理模式。</p>
-
-      <div v-if="triageDone" class="triage-done">
-        <p class="triage-done-title">收件箱已清空</p>
-        <p v-if="inboxPending.length > 0" class="triage-done-hint">
-          其他窗口或周期任务新增的条目保留在列表中，退出后可继续处理。
-        </p>
-        <button class="btn primary" type="button" @click="exitTriage">返回列表</button>
-      </div>
-
-      <template v-else-if="triageCurrent">
-        <Transition name="triage-slide" mode="out-in">
-          <article
-            :key="triageCurrent.id"
-            ref="triageCardEl"
-            class="triage-card glass-card"
-            tabindex="0"
-          >
-          <p class="triage-card-title">{{ triageCurrent.title }}</p>
-          <div class="triage-card-meta">
-            <span
-              v-if="triageCurrent.source"
-              class="todo-source"
-              :title="triageCurrent.source.url"
-            >
-              {{ sourceLabel(triageCurrent.source) }}
-            </span>
-            <span v-if="triageCurrent.dueDate" class="triage-due">
-              到期 {{ localDateValue(triageCurrent.dueDate) }}
-            </span>
-            <span v-if="triageCurrent.repeat" class="triage-repeat">
-              重复 · {{ repeatLabel(triageCurrent.repeat) }}
-            </span>
-          </div>
-        </article>
-        </Transition>
-
-        <div class="triage-actions" role="group" aria-label="处理动作">
-          <button
-            class="btn"
-            type="button"
-            :disabled="triageBusy"
-            @click="runTriageAction('today')"
-          >
-            <kbd>1</kbd> 今天做
-          </button>
-          <button
-            class="btn"
-            type="button"
-            :disabled="triageBusy"
-            @click="runTriageAction('later')"
-          >
-            <kbd>2</kbd> 稍后做
-          </button>
-          <button
-            class="btn"
-            type="button"
-            :disabled="triageBusy"
-            @click="runTriageAction('move')"
-          >
-            <kbd>3</kbd> 转列表
-          </button>
-          <button
-            class="btn"
-            type="button"
-            :disabled="triageBusy"
-            @click="runTriageAction('complete')"
-          >
-            <kbd>4</kbd> 完成
-          </button>
-          <button
-            class="btn danger"
-            type="button"
-            :disabled="triageBusy"
-            @click="runTriageAction('delete')"
-          >
-            <kbd>5</kbd> 删除
-          </button>
-        </div>
-
-        <div v-if="movePickerOpen" class="triage-move-picker">
-          <label class="triage-move-label" for="triage-move-target">转到列表</label>
-          <select id="triage-move-target" v-model="moveTargetListId" class="input">
-            <option v-for="target in triageMoveTargets" :key="target.id" :value="target.id">
-              {{ target.title }}
-            </option>
-          </select>
-          <button
-            class="btn primary"
-            type="button"
-            :disabled="!moveTargetListId || triageBusy"
-            @click="confirmMove"
-          >
-            确认
-          </button>
-          <button class="btn ghost" type="button" @click="movePickerOpen = false">取消</button>
-        </div>
-        <p v-else class="triage-hint">
-          按 <kbd>1</kbd>–<kbd>5</kbd> 执行动作，按 <kbd>Esc</kbd> 退出；完成可取消、删除可在回收站恢复。
-        </p>
-      </template>
-    </section>
+    <TriageMode v-if="triageActive" @exit="triageActive = false" />
 
     <template v-else>
       <div v-if="hasLists" class="todo-groups">
-      <article
-        v-for="(list, listIndex) in store.lists"
-        :key="list.id"
-        class="todo-group glass-card"
-        :class="{ dragging: dragListId === list.id, 'drop-target': dropListId === list.id }"
-        @dragover.self="onListDragOver($event, list.id)"
-        @drop.self="onListDrop(list.id)"
-      >
-        <header class="todo-group-header">
-          <button
-            class="drag-handle"
-            type="button"
-            draggable="true"
-            aria-label="拖动清单排序"
-            title="拖动清单排序"
-            @dragstart="onListDragStart($event, list.id)"
-            @dragend="onListDragEnd"
-          >
-            拖动
-          </button>
-          <input
-            v-if="editingListId === list.id"
-            v-model="editDraft"
-            class="input list-title-edit"
-            aria-label="清单名称"
-            autofocus
-            @keyup.enter="submitOnEnter($event, () => commitListEdit(list))"
-            @keyup.esc="cancelListEdit"
-            @blur="commitListEdit(list)"
-          />
-          <div v-else class="todo-group-heading">
-            <h2>{{ list.title }}</h2>
-            <span>{{ pendingItems(list).length }} 项未完成</span>
-          </div>
-          <div class="group-actions">
-            <button class="btn ghost compact" type="button" @click="startListEdit(list)">重命名</button>
-            <button
-              class="btn ghost compact"
-              type="button"
-              :disabled="listIndex === 0"
-              @click="moveList(list.id, -1)"
-            >
-              上移
-            </button>
-            <button
-              class="btn ghost compact"
-              type="button"
-              :disabled="listIndex === store.lists.length - 1"
-              @click="moveList(list.id, 1)"
-            >
-              下移
-            </button>
-            <button class="btn ghost compact danger" type="button" @click="deleteList(list)">删除</button>
-          </div>
-        </header>
-
-        <form class="todo-add-row" @submit.prevent="addItem(list.id)">
-          <label class="sr-only" :for="`new-item-${list.id}`">添加到 {{ list.title }}</label>
-          <input
-            :id="`new-item-${list.id}`"
-            v-model="drafts[list.id]"
-            class="input"
-            placeholder="添加待办，按 Enter 保存"
-          />
-          <button class="btn primary" type="submit" :disabled="!drafts[list.id]?.trim()">添加</button>
-        </form>
-
-        <ul class="todo-items" :aria-label="`${list.title}中的未完成待办`">
-          <li
-            v-for="(item, itemIndex) in pendingItems(list)"
-            :key="item.id"
-            class="todo-item"
-            :class="{ 'drop-target': dropItemId === item.id, 'is-completing': completingIds.has(item.id) }"
-            draggable="true"
-            @dragstart="onItemDragStart($event, list.id, item.id)"
-            @dragover="onItemDragOver($event, item.id)"
-            @drop="onItemDrop($event, list.id, item.id)"
-            @dragend="onItemDragEnd"
-          >
-            <div class="todo-item-main">
-              <input
-                :id="`todo-${item.id}`"
-                type="checkbox"
-                :checked="item.completed"
-                @change="toggleItemCompleted(item)"
-              />
-              <div class="todo-item-content">
-                <input
-                  v-if="editingItemId === item.id"
-                  v-model="editDraft"
-                  class="item-edit"
-                  aria-label="待办标题"
-                  autofocus
-                  @keyup.enter="submitOnEnter($event, () => commitItemEdit(item))"
-                  @keyup.esc="cancelItemEdit"
-                  @blur="commitItemEdit(item)"
-                />
-                <label
-                  v-else
-                  class="todo-item-title"
-                  :for="`todo-${item.id}`"
-                  @dblclick="startItemEdit(item)"
-                >
-                  {{ item.title }}
-                </label>
-                <div
-                  v-if="item.source || scheduleSummaries(item).length"
-                  class="todo-item-meta"
-                >
-                  <span v-if="item.source" class="todo-source" :title="item.source.url">
-                    {{ sourceLabel(item.source) }}
-                  </span>
-                  <span
-                    v-if="item.source && githubSyncLabel(item)"
-                    class="todo-source-state"
-                    :class="githubSyncClass(item)"
-                    :title="githubSyncTitle(item)"
-                  >
-                    {{ githubSyncLabel(item) }}
-                  </span>
-                  <span
-                    v-for="summary in scheduleSummaries(item)"
-                    :key="summary"
-                    class="todo-schedule-summary"
-                  >
-                    {{ summary }}
-                  </span>
-                </div>
-              </div>
-              <button
-                class="todo-details-toggle"
-                type="button"
-                :aria-expanded="expandedItemId === item.id"
-                :aria-controls="`todo-details-${item.id}`"
-                :aria-label="`${expandedItemId === item.id ? '收起' : '展开'}待办“${item.title}”的详细设置`"
-                @click="toggleItemDetails(list.id, item)"
-              >
-                <span aria-hidden="true">{{ expandedItemId === item.id ? "⌃" : "⌄" }}</span>
-              </button>
-            </div>
-            <div
-              v-if="expandedItemId === item.id"
-              :id="`todo-details-${item.id}`"
-              class="todo-item-details"
-            >
-              <div class="todo-item-schedule">
-                <label>
-                  <span>到期日</span>
-                  <input
-                    type="date"
-                    :value="localDateValue(item.dueDate)"
-                    @change="setDueDate(item, ($event.target as HTMLInputElement).value)"
-                  />
-                </label>
-                <label>
-                  <span>提醒时间</span>
-                  <input
-                    type="datetime-local"
-                    :value="localDateTimeValue(item.remindAt)"
-                    title="需先设置到期日"
-                    :disabled="!item.dueDate"
-                    @change="setRemindAt(item, ($event.target as HTMLInputElement).value)"
-                  />
-                </label>
-                <label>
-                  <span>重复规则</span>
-                  <select
-                    :value="item.repeat ?? ''"
-                    @change="setRepeat(item, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">不重复</option>
-                    <option value="daily">每天</option>
-                    <option value="weekly">每周</option>
-                    <option value="biweekly">每两周</option>
-                    <option value="monthly">每月</option>
-                  </select>
-                </label>
-              </div>
-              <div class="todo-item-actions">
-                <button class="text-action" type="button" @click="startItemEdit(item)">编辑</button>
-                <button
-                  v-if="item.source && isHttpUrl(item.source.url)"
-                  class="text-action"
-                  type="button"
-                  :title="`打开来源 ${item.source.url}`"
-                  @click="openSource(item)"
-                >
-                  打开来源
-                </button>
-                <select
-                  class="move-select"
-                  :value="list.id"
-                  :aria-label="`移动${item.title}到其他清单`"
-                  @change="moveToList(item.id, ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="target in store.lists" :key="target.id" :value="target.id">
-                    {{ target.id === list.id ? "移动到…" : target.title }}
-                  </option>
-                </select>
-                <button
-                  class="text-action"
-                  type="button"
-                  :disabled="itemIndex === 0"
-                  @click="moveItem(list.id, item.id, -1)"
-                >
-                  上移
-                </button>
-                <button
-                  class="text-action"
-                  type="button"
-                  :disabled="itemIndex === pendingItems(list).length - 1"
-                  @click="moveItem(list.id, item.id, 1)"
-                >
-                  下移
-                </button>
-                <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
-              </div>
-            </div>
-          </li>
-          <li
-            v-if="pendingItems(list).length === 0"
-            class="todo-empty-drop"
-            @dragover="onItemDragOver($event)"
-            @drop="onItemDrop($event, list.id)"
-          >
-            {{ completedItems(list).length ? "这一组已经全部完成" : "暂无待办，从上方添加一项" }}
-          </li>
-        </ul>
-
-        <section v-if="completedItems(list).length" class="completed-section">
-          <button
-            class="completed-toggle"
-            type="button"
-            :aria-expanded="completedOpen[list.id] === true"
-            @click="completedOpen[list.id] = !completedOpen[list.id]"
-          >
-            <span>已完成</span>
-            <span>{{ completedItems(list).length }} 项 · {{ completedOpen[list.id] ? "收起" : "展开" }}</span>
-          </button>
-          <ul v-if="completedOpen[list.id]" class="todo-items completed-items">
-            <li
-              v-for="item in completedItems(list)"
-              :key="item.id"
-              class="todo-item done"
-              :class="{ 'drop-target': dropItemId === item.id }"
-              draggable="true"
-              @dragstart="onItemDragStart($event, list.id, item.id)"
-              @dragover="onItemDragOver($event, item.id)"
-              @drop="onItemDrop($event, list.id, item.id)"
-              @dragend="onItemDragEnd"
-            >
-              <div class="todo-item-main">
-                <input
-                  :id="`todo-${item.id}`"
-                  type="checkbox"
-                  :checked="item.completed"
-                  @change="toggleItemCompleted(item)"
-                />
-                <div class="todo-item-content">
-                  <label class="todo-item-title" :for="`todo-${item.id}`">{{ item.title }}</label>
-                  <div
-                    v-if="item.source || scheduleSummaries(item).length"
-                    class="todo-item-meta"
-                  >
-                    <span v-if="item.source" class="todo-source" :title="item.source.url">
-                      {{ sourceLabel(item.source) }}
-                    </span>
-                    <span
-                      v-if="item.source && githubSyncLabel(item)"
-                      class="todo-source-state"
-                      :class="githubSyncClass(item)"
-                      :title="githubSyncTitle(item)"
-                    >
-                      {{ githubSyncLabel(item) }}
-                    </span>
-                    <span
-                      v-for="summary in scheduleSummaries(item)"
-                      :key="summary"
-                      class="todo-schedule-summary"
-                    >
-                      {{ summary }}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  class="todo-details-toggle"
-                  type="button"
-                  :aria-expanded="expandedItemId === item.id"
-                  :aria-controls="`todo-details-${item.id}`"
-                  :aria-label="`${expandedItemId === item.id ? '收起' : '展开'}待办“${item.title}”的详细设置`"
-                  @click="toggleItemDetails(list.id, item)"
-                >
-                  <span aria-hidden="true">{{ expandedItemId === item.id ? "⌃" : "⌄" }}</span>
-                </button>
-              </div>
-              <div
-                v-if="expandedItemId === item.id"
-                :id="`todo-details-${item.id}`"
-                class="todo-item-details completed-details"
-              >
-                <div class="todo-item-actions">
-                  <button
-                    v-if="item.source && isHttpUrl(item.source.url)"
-                    class="text-action"
-                    type="button"
-                    :title="`打开来源 ${item.source.url}`"
-                    @click="openSource(item)"
-                  >
-                    打开来源
-                  </button>
-                  <button class="text-action danger" type="button" @click="deleteItem(item)">删除</button>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </section>
-      </article>
+        <TodoListCard
+          v-for="(list, listIndex) in store.lists"
+          :key="list.id"
+          :list="list"
+          :list-index="listIndex"
+          :total-lists="store.lists.length"
+          :lists="store.lists"
+          :pending="pendingItems(list)"
+          :completed="completedItems(list)"
+          :editing-list-title="editingListId === list.id"
+          :editing-item-id="editingItemId"
+          :expanded-item-id="expandedItemId"
+          :dragging-list="dragListId === list.id"
+          :drop-list-target="dropListId === list.id"
+          :drop-item-id="dropItemId"
+          :completing-ids="completingIds"
+          @start-list-edit="startListEdit(list)"
+          @commit-list-edit="(title) => commitListEdit(list, title)"
+          @cancel-list-edit="editingListId = null"
+          @delete-list="deleteList(list)"
+          @move-list="(delta) => moveList(list.id, delta)"
+          @add-item="(title) => store.createItem(list.id, title)"
+          @toggle-item-completed="toggleItemCompleted"
+          @toggle-item-details="(item) => toggleItemDetails(list.id, item)"
+          @start-item-edit="editingItemId = $event"
+          @commit-item-edit="commitItemEdit"
+          @cancel-item-edit="editingItemId = null"
+          @delete-item="deleteItem"
+          @open-source="openSource"
+          @move-to-list="moveToList"
+          @move-item="(itemId, delta) => moveItem(list.id, itemId, delta)"
+          @error="actionError = $event"
+          @list-dragstart="(event) => onListDragStart(event, list.id)"
+          @list-dragover="(event) => onListDragOver(event, list.id)"
+          @list-drop="onListDrop(list.id)"
+          @list-dragend="onListDragEnd"
+          @item-dragstart="(event, itemId) => onItemDragStart(event, list.id, itemId)"
+          @item-dragover="onItemDragOver"
+          @item-drop="(event, itemId) => onItemDrop(event, list.id, itemId)"
+          @item-dragend="onItemDragEnd"
+        />
       </div>
 
       <EmptyState v-else title="还没有清单" text="先新建一个，把第一件事记下来。" />

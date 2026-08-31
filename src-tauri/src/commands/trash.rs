@@ -16,7 +16,9 @@ pub struct Trash {
 }
 #[tauri::command]
 pub fn trash_list(state: State<'_, AppState>) -> AppResult<Trash> {
-    let lists = state.services.todo.list(true)?;
+    // Trash is rarely opened; materialize owned copies from the shared cache.
+    let lists = (*state.services.todo.list(true)?).clone();
+    let notes = (*state.services.note.list(true)?).clone();
     Ok(Trash {
         todo_lists: lists.iter().filter(|v| v.deleted).cloned().collect(),
         todo_items: lists
@@ -24,13 +26,7 @@ pub fn trash_list(state: State<'_, AppState>) -> AppResult<Trash> {
             .flat_map(|v| v.items)
             .filter(|v| v.deleted)
             .collect(),
-        notes: state
-            .services
-            .note
-            .list(true)?
-            .into_iter()
-            .filter(|v| v.deleted)
-            .collect(),
+        notes: notes.into_iter().filter(|v| v.deleted).collect(),
     })
 }
 #[tauri::command]

@@ -36,7 +36,16 @@ pub struct TodoService {
     inbox_lock: Mutex<()>,
     /// Full on-disk lists (including deleted). Invalidated on every write so
     /// the reminder loop and Focus/palette reads do not rescan JSON every tick.
-    cache: Mutex<Option<Vec<TodoList>>>,
+    cache: Mutex<TodoCache>,
+}
+
+/// Shared read projections of the todo data. Both variants are built once per
+/// invalidation and handed out as `Arc` clones, so frequent readers (due
+/// tracking, focus overview, palette) never deep-clone the whole tree.
+#[derive(Default)]
+struct TodoCache {
+    full: Option<Arc<Vec<TodoList>>>,
+    visible: Option<Arc<Vec<TodoList>>>,
 }
 
 impl TodoService {
@@ -44,41 +53,50 @@ impl TodoService {
         Self {
             storage,
             inbox_lock: Mutex::new(()),
-            cache: Mutex::new(None),
+            cache: Mutex::new(TodoCache::default()),
         }
     }
 
     pub fn invalidate_cache(&self) {
         if let Ok(mut guard) = self.cache.lock() {
-            *guard = None;
+            *guard = TodoCache::default();
         }
     }
 
-    pub fn list(&self, include_deleted: bool) -> AppResult<Vec<TodoList>> {
-        let mut lists = {
-            let mut guard = self
-                .cache
-                .lock()
-                .map_err(|_| AppError::Internal("todo cache lock poisoned".into()))?;
-            if let Some(cached) = guard.as_ref() {
-                cached.clone()
-            } else {
+    pub fn list(&self, include_deleted: bool) -> AppResult<Arc<Vec<TodoList>>> {
+        let mut guard = self
+            .cache
+            .lock()
+            .map_err(|_| AppError::Internal("todo cache lock poisoned".into()))?;
+        if include_deleted {
+            if guard.full.is_none() {
                 let loaded: Vec<TodoList> = self.storage.list_json("todos")?;
-                *guard = Some(loaded.clone());
-                loaded
+                guard.full = Some(Arc::new(loaded));
             }
-        };
-        if !include_deleted {
-            lists.retain(|list| !list.deleted);
-            for list in &mut lists {
-                list.items.retain(|item| !item.deleted);
+            return Ok(guard.full.clone().expect("full cache populated"));
+        }
+        if guard.visible.is_none() {
+            if guard.full.is_none() {
+                let loaded: Vec<TodoList> = self.storage.list_json("todos")?;
+                guard.full = Some(Arc::new(loaded));
             }
+            let full = guard.full.clone().expect("full cache populated");
+            let mut visible: Vec<TodoList> = full
+                .iter()
+                .filter(|list| !list.deleted)
+                .map(|list| {
+                    let mut list = list.clone();
+                    list.items.retain(|item| !item.deleted);
+                    list
+                })
+                .collect();
+            visible.sort_by_key(|list| list.sort_order);
+            for list in &mut visible {
+                list.items.sort_by_key(|item| item.sort_order);
+            }
+            guard.visible = Some(Arc::new(visible));
         }
-        lists.sort_by_key(|list| list.sort_order);
-        for list in &mut lists {
-            list.items.sort_by_key(|item| item.sort_order);
-        }
-        Ok(lists)
+        Ok(guard.visible.clone().expect("visible cache populated"))
     }
 
     pub fn create_list(&self, title: String) -> AppResult<TodoList> {
@@ -146,7 +164,7 @@ impl TodoService {
     }
 
     pub fn reorder_lists(&self, ids: &[String]) -> AppResult<Vec<TodoList>> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for (order, id) in ids.iter().enumerate() {
             let list = lists
                 .iter_mut()
@@ -156,7 +174,7 @@ impl TodoService {
             list.updated_at = now_rfc3339();
             self.save(list)?;
         }
-        self.list(false)
+        Ok((*self.list(false)?).clone())
     }
 
     pub fn create_item(
@@ -221,7 +239,7 @@ impl TodoService {
         };
         source.validate()?;
         let lists = self.list(false)?;
-        for list in &lists {
+        for list in lists.iter() {
             if let Some(item) = list.items.iter().find(|item| {
                 !item.deleted
                     && !item.completed
@@ -250,7 +268,7 @@ impl TodoService {
         deleted: Option<bool>,
         schedule: Option<TodoSchedule>,
     ) -> AppResult<TodoItem> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for list in &mut lists {
             let next_order = list.items.len() as i32;
             if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
@@ -312,7 +330,7 @@ impl TodoService {
         synced_at: &str,
         auto_complete: bool,
     ) -> AppResult<(TodoItem, bool, bool)> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for list in &mut lists {
             if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
                 if item.source.is_none() {
@@ -386,7 +404,7 @@ impl TodoService {
         error: &str,
         recorded_at: &str,
     ) -> AppResult<(TodoItem, bool)> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for list in &mut lists {
             if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
                 if item.source.is_none() {
@@ -420,7 +438,7 @@ impl TodoService {
     }
 
     pub fn move_item(&self, id: &str, target_list_id: &str, index: usize) -> AppResult<TodoItem> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         let mut found = None;
         let mut source_list_id = None;
         for list in &mut lists {
@@ -471,7 +489,7 @@ impl TodoService {
         if kind == "todoList" {
             return self.storage.delete_entity("todos", id);
         }
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for list in &mut lists {
             if let Some(pos) = list.items.iter().position(|v| v.id == id) {
                 list.items.remove(pos);
@@ -485,7 +503,7 @@ impl TodoService {
     /// Record that a reminder for `remind_at` was delivered or suppressed.
     /// Missing items degrade to a no-op so the scheduler never crashes.
     pub fn mark_reminded(&self, id: &str, remind_at: &str) -> AppResult<()> {
-        let mut lists = self.list(true)?;
+        let mut lists = (*self.list(true)?).clone();
         for list in &mut lists {
             if let Some(item) = list.items.iter_mut().find(|v| v.id == id) {
                 if item.last_reminded_at.as_deref() == Some(remind_at) {
@@ -503,8 +521,9 @@ impl TodoService {
 
     fn get(&self, id: &str) -> AppResult<TodoList> {
         self.list(true)?
-            .into_iter()
+            .iter()
             .find(|v| v.id == id)
+            .cloned()
             .ok_or_else(|| AppError::NotFound(format!("todo list {id}")))
     }
     fn save(&self, list: &TodoList) -> AppResult<()> {
@@ -592,12 +611,13 @@ mod tests {
     use crate::events::now_rfc3339;
     use std::sync::Arc;
 
-    fn temp_service(tag: &str) -> (std::path::PathBuf, TodoService) {
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-todo-{}-{}", tag, uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
-        (dir, TodoService::new(storage))
+    fn temp_service(tag: &str) -> (tempfile::TempDir, TodoService) {
+        let tmp = tempfile::Builder::new()
+            .prefix(&format!("maydolist-todo-{tag}-"))
+            .tempdir()
+            .unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
+        (tmp, TodoService::new(storage))
     }
 
     fn schedule(
@@ -616,42 +636,39 @@ mod tests {
 
     #[test]
     fn ensure_inbox_creates_exactly_once() {
-        let (dir, service) = temp_service("inbox-once");
+        let (_tmp, service) = temp_service("inbox-once");
         let first = service.ensure_inbox().unwrap();
         assert_eq!(first.title, INBOX_TITLE);
         assert_eq!(first.kind.as_deref(), Some(INBOX_KIND));
         let second = service.ensure_inbox().unwrap();
         assert_eq!(first.id, second.id);
         assert_eq!(service.list(false).unwrap().len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn ensure_inbox_adopts_legacy_list_with_inbox_title() {
-        let (dir, service) = temp_service("inbox-adopt");
+        let (_tmp, service) = temp_service("inbox-adopt");
         let legacy = service.create_list(INBOX_TITLE.into()).unwrap();
         assert_eq!(legacy.kind, None);
         let inbox = service.ensure_inbox().unwrap();
         assert_eq!(inbox.id, legacy.id);
         assert_eq!(inbox.kind.as_deref(), Some(INBOX_KIND));
         assert_eq!(service.list(false).unwrap().len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn ensure_inbox_ignores_deleted_inbox_and_creates_new_one() {
-        let (dir, service) = temp_service("inbox-deleted");
+        let (_tmp, service) = temp_service("inbox-deleted");
         let legacy = service.create_list(INBOX_TITLE.into()).unwrap();
         service.update_list(&legacy.id, None, Some(true)).unwrap();
         let inbox = service.ensure_inbox().unwrap();
         assert_ne!(inbox.id, legacy.id);
         assert_eq!(inbox.kind.as_deref(), Some(INBOX_KIND));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn inbox_created_by_ensure_is_usable_for_items() {
-        let (dir, service) = temp_service("inbox-items");
+        let (_tmp, service) = temp_service("inbox-items");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -664,12 +681,11 @@ mod tests {
         assert_eq!(item.title, "修复登录");
         let stored = service.get(&inbox.id).unwrap();
         assert_eq!(stored.items.len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_from_github_lands_in_inbox_with_source() {
-        let (dir, service) = temp_service("gh-to-todo");
+        let (_tmp, service) = temp_service("gh-to-todo");
         let (list, item, created) = service
             .create_item_from_github(
                 "github-pr",
@@ -695,12 +711,11 @@ mod tests {
         assert_eq!(stored.items.len(), 1);
         assert_eq!(stored.items[0].source, item.source);
         assert_eq!(service.list(false).unwrap().len(), 1, "inbox created once");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_from_github_dedups_by_repo_and_number() {
-        let (dir, service) = temp_service("gh-dedup");
+        let (_tmp, service) = temp_service("gh-dedup");
         let (_, first, created_first) = service
             .create_item_from_github(
                 "github-issue",
@@ -725,12 +740,11 @@ mod tests {
         assert_eq!(first.id, second.id);
         let inbox = service.ensure_inbox().unwrap();
         assert_eq!(inbox.items.len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn github_closed_source_auto_completes_without_spawning_repeat() {
-        let (dir, service) = temp_service("gh-sync-close");
+        let (_tmp, service) = temp_service("gh-sync-close");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -780,12 +794,11 @@ mod tests {
             1,
             "sync completion must not create a repeat item"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn github_merged_source_auto_completes_and_reopen_does_not_reopen_todo() {
-        let (dir, service) = temp_service("gh-sync-merge-reopen");
+        let (_tmp, service) = temp_service("gh-sync-merge-reopen");
         let (_, item, _) = service
             .create_item_from_github(
                 "github-pr",
@@ -827,12 +840,11 @@ mod tests {
             .unwrap()
             .auto_completed_at
             .is_some());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn github_sync_error_never_auto_completes_or_guesses_closed() {
-        let (dir, service) = temp_service("gh-sync-error");
+        let (_tmp, service) = temp_service("gh-sync-error");
         let (_, item, _) = service
             .create_item_from_github(
                 "github-issue",
@@ -850,12 +862,11 @@ mod tests {
         let sync = updated.github_sync.unwrap();
         assert_eq!(sync.state, GithubSyncState::Unknown);
         assert_eq!(sync.sync_error.as_deref(), Some("GitHub API unavailable"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn manually_undoing_auto_completion_is_respected_until_source_reopens() {
-        let (dir, service) = temp_service("gh-sync-undo");
+        let (_tmp, service) = temp_service("gh-sync-undo");
         let (_, item, _) = service
             .create_item_from_github(
                 "github-issue",
@@ -910,12 +921,11 @@ mod tests {
             .unwrap();
         assert!(auto_completed_again);
         assert!(closed_again.completed);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_from_github_rejects_invalid_input_without_partial_record() {
-        let (dir, service) = temp_service("gh-reject");
+        let (_tmp, service) = temp_service("gh-reject");
         let bad_kind = service.create_item_from_github(
             "github-star",
             "owner/repo",
@@ -945,12 +955,11 @@ mod tests {
             0,
             "no inbox/list may be created on failure"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_rejects_invalid_source_url() {
-        let (dir, service) = temp_service("bad-source");
+        let (_tmp, service) = temp_service("bad-source");
         let inbox = service.ensure_inbox().unwrap();
         let bad = service.create_item(
             &inbox.id,
@@ -966,12 +975,11 @@ mod tests {
         assert!(bad.is_err());
         let stored = service.get(&inbox.id).unwrap();
         assert_eq!(stored.items.len(), 0, "no half-written item");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn todo_source_roundtrips_through_json_with_type_field() {
-        let (dir, service) = temp_service("source-roundtrip");
+        let (tmp, service) = temp_service("source-roundtrip");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -987,17 +995,17 @@ mod tests {
             )
             .unwrap();
         let raw =
-            std::fs::read_to_string(dir.join("todos").join(format!("{}.json", inbox.id))).unwrap();
+            std::fs::read_to_string(tmp.path().join("todos").join(format!("{}.json", inbox.id)))
+                .unwrap();
         assert!(raw.contains("\"source\": {"));
         assert!(raw.contains("\"type\": \"github-pr\""));
         let parsed: TodoList = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed.items[0].source, item.source);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn old_todo_without_source_reads_as_none() {
-        let (dir, service) = temp_service("legacy-source");
+        let (tmp, service) = temp_service("legacy-source");
         let id = uuid::Uuid::new_v4().to_string();
         let legacy = format!(
             r#"{{
@@ -1022,21 +1030,21 @@ mod tests {
             }}"#,
             uuid::Uuid::new_v4()
         );
-        std::fs::write(dir.join("todos").join(format!("{id}.json")), legacy).unwrap();
+        std::fs::write(tmp.path().join("todos").join(format!("{id}.json")), legacy).unwrap();
         let lists = service.list(false).unwrap();
         assert_eq!(lists.len(), 1);
         assert_eq!(lists[0].items.len(), 1);
         assert_eq!(lists[0].items[0].title, "旧待办");
         assert_eq!(lists[0].items[0].source, None);
         // Old format without the field stays byte-compatible when re-saved.
-        let raw = std::fs::read_to_string(dir.join("todos").join(format!("{id}.json"))).unwrap();
+        let raw =
+            std::fs::read_to_string(tmp.path().join("todos").join(format!("{id}.json"))).unwrap();
         assert!(!raw.contains("\"source\""));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn list_kind_roundtrips_through_json() {
-        let (dir, service) = temp_service("kind-roundtrip");
+        let (tmp, service) = temp_service("kind-roundtrip");
         let mut list = service.create_list("普通列表".into()).unwrap();
         assert_eq!(list.kind, None);
         list.kind = Some(INBOX_KIND.into());
@@ -1045,14 +1053,14 @@ mod tests {
         let stored = service.get(&list.id).unwrap();
         assert_eq!(stored.kind.as_deref(), Some(INBOX_KIND));
         let raw =
-            std::fs::read_to_string(dir.join("todos").join(format!("{}.json", list.id))).unwrap();
+            std::fs::read_to_string(tmp.path().join("todos").join(format!("{}.json", list.id)))
+                .unwrap();
         assert!(raw.contains("\"kind\": \"inbox\""));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_persists_due_reminder_and_repeat_fields() {
-        let (dir, service) = temp_service("due-fields");
+        let (tmp, service) = temp_service("due-fields");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1074,15 +1082,15 @@ mod tests {
         assert_eq!(stored.items[0].remind_at, item.remind_at);
         assert_eq!(stored.items[0].repeat_until, item.repeat_until);
         let raw =
-            std::fs::read_to_string(dir.join("todos").join(format!("{}.json", inbox.id))).unwrap();
+            std::fs::read_to_string(tmp.path().join("todos").join(format!("{}.json", inbox.id)))
+                .unwrap();
         assert!(raw.contains("\"dueDate\": \"2026-08-20\""));
         assert!(raw.contains("\"repeat\": \"weekly\""));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_item_rejects_invalid_due_fields_without_partial_record() {
-        let (dir, service) = temp_service("due-reject");
+        let (_tmp, service) = temp_service("due-reject");
         let inbox = service.ensure_inbox().unwrap();
         assert!(service
             .create_item(
@@ -1110,12 +1118,11 @@ mod tests {
             .is_err());
         let stored = service.get(&inbox.id).unwrap();
         assert_eq!(stored.items.len(), 0, "no half-written item");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn completing_repeat_item_spawns_exactly_one_next_instance() {
-        let (dir, service) = temp_service("repeat-spawn");
+        let (_tmp, service) = temp_service("repeat-spawn");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1148,12 +1155,11 @@ mod tests {
             .unwrap();
         let stored = service.get(&inbox.id).unwrap();
         assert_eq!(stored.items.iter().filter(|v| !v.completed).count(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn repeat_until_stops_generation_on_completion() {
-        let (dir, service) = temp_service("repeat-until");
+        let (_tmp, service) = temp_service("repeat-until");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1177,12 +1183,11 @@ mod tests {
             1,
             "repeatUntil expired -> no next instance"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn completing_plain_item_creates_no_next_instance() {
-        let (dir, service) = temp_service("plain-complete");
+        let (_tmp, service) = temp_service("plain-complete");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1197,12 +1202,11 @@ mod tests {
             .unwrap();
         let stored = service.get(&inbox.id).unwrap();
         assert_eq!(stored.items.len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn repeat_next_instance_keeps_source_link() {
-        let (dir, service) = temp_service("repeat-source");
+        let (_tmp, service) = temp_service("repeat-source");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1224,12 +1228,11 @@ mod tests {
         let next = stored.items.iter().find(|v| !v.completed).unwrap();
         let source = next.source.as_ref().expect("source must be kept");
         assert_eq!(source.number, 7);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn update_item_can_clear_and_validate_due_fields() {
-        let (dir, service) = temp_service("update-due");
+        let (_tmp, service) = temp_service("update-due");
         let inbox = service.ensure_inbox().unwrap();
         let item = service
             .create_item(
@@ -1255,6 +1258,49 @@ mod tests {
             .unwrap();
         assert_eq!(updated.due_date, None);
         assert_eq!(updated.remind_at, None);
-        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn move_item_cross_list_renumbers_sort_order_and_clamps_index() {
+        let (_tmp, service) = temp_service("move-item");
+        let source_list = service.create_list("来源列表".into()).unwrap();
+        let target_list = service.create_list("目标列表".into()).unwrap();
+        let titles = ["A", "B", "C"];
+        let mut ids = Vec::new();
+        for title in titles {
+            let item = service
+                .create_item(&source_list.id, title.into(), None, TodoSchedule::default())
+                .unwrap();
+            ids.push(item.id);
+        }
+
+        // 跨列表移动到目标列表中间位置。
+        let moved = service.move_item(&ids[2], &target_list.id, 0).unwrap();
+        assert_eq!(moved.title, "C");
+        // 再次移动插入到目标列表头部，验证插入索引与重排。
+        let _ = service.move_item(&ids[1], &target_list.id, 0).unwrap();
+        let target = service.get(&target_list.id).unwrap();
+        let target_titles: Vec<&str> = target.items.iter().map(|v| v.title.as_str()).collect();
+        assert_eq!(target_titles, vec!["B", "C"]);
+        let orders: Vec<i32> = target.items.iter().map(|v| v.sort_order).collect();
+        assert_eq!(orders, vec![0, 1]);
+
+        // 源列表剩余条目重排为连续序号。
+        let source = service.get(&source_list.id).unwrap();
+        assert_eq!(source.items.len(), 1);
+        assert_eq!(source.items[0].title, "A");
+        assert_eq!(source.items[0].sort_order, 0);
+
+        // 越界索引钳制到列表末尾而不是报错。
+        let _ = service.move_item(&ids[0], &target_list.id, 99).unwrap();
+        let target = service.get(&target_list.id).unwrap();
+        let titles: Vec<&str> = target.items.iter().map(|v| v.title.as_str()).collect();
+        assert_eq!(titles, vec!["B", "C", "A"]);
+
+        // 缺失条目 / 缺失列表都报 NotFound。
+        assert!(service
+            .move_item("missing-item", &target_list.id, 0)
+            .is_err());
+        assert!(service.move_item(&ids[0], "missing-list", 0).is_err());
     }
 }

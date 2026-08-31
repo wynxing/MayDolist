@@ -2,12 +2,13 @@ use crate::{
     error::AppResult, events::emit_entity_changed, models::Note, services::note::NotePatch,
     AppState,
 };
+use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub fn note_list(
     state: State<'_, AppState>,
     include_deleted: Option<bool>,
-) -> AppResult<Vec<Note>> {
+) -> AppResult<Arc<Vec<Note>>> {
     state.services.note.list(include_deleted.unwrap_or(false))
 }
 #[tauri::command]

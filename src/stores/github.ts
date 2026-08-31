@@ -1,21 +1,8 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { listen } from "@tauri-apps/api/event";
 import * as api from "../api/github";
-import type {
-  GhAuthStatus,
-  GithubSyncSummary,
-  RepoSnapshot,
-  RepoWatch,
-} from "../types/github";
-
-let ready = false;
-let timer: number | undefined;
-
-function scheduleRefresh(refresh: () => Promise<void>) {
-  clearTimeout(timer);
-  timer = window.setTimeout(() => void refresh(), 150);
-}
+import { EntitySyncer } from "./entitySync";
+import type { GhAuthStatus, GithubSyncSummary, RepoSnapshot, RepoWatch } from "../types/github";
 
 export const useGithubStore = defineStore("github", () => {
   const auth = ref<GhAuthStatus | null>(null);
@@ -32,25 +19,20 @@ export const useGithubStore = defineStore("github", () => {
 
   const load = async () => {
     try {
-      [auth.value, watchlist.value] = await Promise.all([api.status(), api.watchlist()]);
-      snapshots.value = (
-        await Promise.all(watchlist.value.map((v) => api.snapshot(v.fullName)))
-      ).filter(Boolean) as RepoSnapshot[];
+      // Single round trip: auth + watchlist + every snapshot.
+      const result = await api.overview();
+      auth.value = result.auth;
+      watchlist.value = result.watchlist;
+      snapshots.value = result.snapshots;
       error.value = null;
     } catch (e) {
       error.value = String(e);
     }
   };
 
-  const init = async () => {
-    if (!ready) {
-      ready = true;
-      await listen<{ domain: string }>("entity-changed", (e) => {
-        if (e.payload.domain === "github") scheduleRefresh(load);
-      });
-    }
-    await load();
-  };
+  const syncer = new EntitySyncer((domain) => domain === "github", load);
+
+  const init = () => syncer.init();
 
   return {
     auth,

@@ -55,7 +55,11 @@ onMounted(async () => {
   await settings.init();
   await updater.init();
   trash.value = await call<Trash>("trash_list");
-  recentBackups.value = await backupApi.listBackups().catch(() => []);
+  try {
+    recentBackups.value = await backupApi.listBackups();
+  } catch (err) {
+    dataError.value = `备份列表加载失败：${err instanceof Error ? err.message : String(err)}`;
+  }
 });
 
 function formatSize(bytes: number) {
@@ -179,10 +183,7 @@ function toggleQuietHours() {
   settings.config.quietHours = quietEnabled.value ? null : { start: "22:00", end: "07:00" };
 }
 
-function previewOpacity(
-  key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity",
-  event: Event
-) {
+function previewOpacity(key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacity", event: Event) {
   if (!settings.config) return;
   const value = Number((event.target as HTMLInputElement).value);
   settings.config[key] = value;
@@ -195,6 +196,12 @@ async function migrate() {
   if (settings.config) settings.config.dataDir = dataDir;
   target.value = "";
   message.value = "数据目录已迁移";
+}
+
+async function chooseTarget() {
+  // Native directory picker; the manual input below remains as a fallback.
+  const dir = await open({ directory: true, title: "选择新的数据目录" });
+  if (dir) target.value = String(dir);
 }
 
 async function action(kind: string, id: string, command: string) {
@@ -330,9 +337,19 @@ async function runPendingConfirm() {
         <div v-if="quietEnabled && settings.config.quietHours" class="settings-row">
           <span>安静时段</span>
           <span class="settings-control quiet-hours-controls">
-            <input v-model="settings.config.quietHours.start" type="time" class="input" aria-label="安静时段开始" />
+            <input
+              v-model="settings.config.quietHours.start"
+              type="time"
+              class="input"
+              aria-label="安静时段开始"
+            />
             <span class="quiet-hours-sep">至</span>
-            <input v-model="settings.config.quietHours.end" type="time" class="input" aria-label="安静时段结束" />
+            <input
+              v-model="settings.config.quietHours.end"
+              type="time"
+              class="input"
+              aria-label="安静时段结束"
+            />
           </span>
         </div>
 
@@ -381,10 +398,17 @@ async function runPendingConfirm() {
             <small>只检查已转为 Todo 的 GitHub PR / Issue</small>
           </span>
           <span class="settings-control settings-inline-action">
-            <button class="btn ghost compact" type="button" :disabled="syncBusy || !settings.config.githubSyncEnabled" @click="syncLinkedTodos">
+            <button
+              class="btn ghost compact"
+              type="button"
+              :disabled="syncBusy || !settings.config.githubSyncEnabled"
+              @click="syncLinkedTodos"
+            >
               {{ syncBusy ? "同步中…" : "立即同步" }}
             </button>
-            <small v-if="syncMessage" class="settings-message" role="status">{{ syncMessage }}</small>
+            <small v-if="syncMessage" class="settings-message" role="status">{{
+              syncMessage
+            }}</small>
           </span>
         </div>
 
@@ -397,6 +421,20 @@ async function runPendingConfirm() {
             v-model.number="settings.config.githubStaleDays"
             type="number"
             min="0"
+            class="input settings-control"
+          />
+        </label>
+
+        <label class="settings-row">
+          <span>
+            收件箱「稍后做」顺延天数
+            <small>天，1-30</small>
+          </span>
+          <input
+            v-model.number="settings.config.triageLaterDays"
+            type="number"
+            min="1"
+            max="30"
             class="input settings-control"
           />
         </label>
@@ -434,7 +472,9 @@ async function runPendingConfirm() {
               aria-label="主面板玻璃透明度"
               @input="previewOpacity('mainWindowGlassOpacity', $event)"
             />
-            <b class="slider-value">{{ Math.round(settings.config.mainWindowGlassOpacity * 100) }}%</b>
+            <b class="slider-value"
+              >{{ Math.round(settings.config.mainWindowGlassOpacity * 100) }}%</b
+            >
           </span>
         </label>
 
@@ -453,7 +493,9 @@ async function runPendingConfirm() {
               aria-label="悬浮便签玻璃透明度"
               @input="previewOpacity('floatingNoteGlassOpacity', $event)"
             />
-            <b class="slider-value">{{ Math.round(settings.config.floatingNoteGlassOpacity * 100) }}%</b>
+            <b class="slider-value"
+              >{{ Math.round(settings.config.floatingNoteGlassOpacity * 100) }}%</b
+            >
           </span>
         </label>
       </div>
@@ -466,27 +508,76 @@ async function runPendingConfirm() {
       <div class="update-heading">
         <div>
           <h3>关于与更新</h3>
-          <p class="settings-note">安装版可安全下载并安装签名更新；便携版仅跳转到 GitHub Release。</p>
+          <p class="settings-note">
+            安装版可安全下载并安装签名更新；便携版仅跳转到 GitHub Release。
+          </p>
         </div>
         <span class="update-version">v{{ updater.runtime?.currentVersion ?? "—" }}</span>
       </div>
       <div class="update-summary">
-        <div><small>运行方式</small><strong>{{ updater.runtime?.portable ? "便携版 / 开发版" : "NSIS 安装版" }}</strong></div>
-        <div><small>上次检查</small><strong>{{ formatCheckTime(updater.lastCheckAt) }}</strong></div>
-        <div><small>状态</small><strong>{{ updater.status === "checking" ? "正在检查" : updater.status === "up-to-date" ? "已是最新版" : updater.status === "available" ? `发现 v${updater.available?.version}` : updater.status === "downloading" ? "正在下载" : updater.status === "ready-to-restart" ? "等待重启" : updater.status === "failed" ? "检查失败" : "尚未检查" }}</strong></div>
+        <div>
+          <small>运行方式</small
+          ><strong>{{ updater.runtime?.portable ? "便携版 / 开发版" : "NSIS 安装版" }}</strong>
+        </div>
+        <div>
+          <small>上次检查</small><strong>{{ formatCheckTime(updater.lastCheckAt) }}</strong>
+        </div>
+        <div>
+          <small>状态</small
+          ><strong>{{
+            updater.status === "checking"
+              ? "正在检查"
+              : updater.status === "up-to-date"
+                ? "已是最新版"
+                : updater.status === "available"
+                  ? `发现 v${updater.available?.version}`
+                  : updater.status === "downloading"
+                    ? "正在下载"
+                    : updater.status === "ready-to-restart"
+                      ? "等待重启"
+                      : updater.status === "failed"
+                        ? "检查失败"
+                        : "尚未检查"
+          }}</strong>
+        </div>
       </div>
       <div v-if="updater.available" class="update-release">
         <strong>MayDolist v{{ updater.available.version }}</strong>
-        <small v-if="updater.available.date">{{ new Date(updater.available.date).toLocaleDateString("zh-CN") }}</small>
+        <small v-if="updater.available.date">{{
+          new Date(updater.available.date).toLocaleDateString("zh-CN")
+        }}</small>
         <p>{{ updater.available.body || "此版本没有发行说明。" }}</p>
       </div>
-      <p v-if="updater.status === 'downloading'" class="settings-note" role="status">正在下载更新{{ updater.downloadPercent === null ? "…" : `：${updater.downloadPercent}%` }}</p>
+      <p v-if="updater.status === 'downloading'" class="settings-note" role="status">
+        正在下载更新{{ updater.downloadPercent === null ? "…" : `：${updater.downloadPercent}%` }}
+      </p>
       <p v-if="updater.error" class="update-error" role="alert">{{ updater.error }}</p>
       <div class="settings-actions update-actions">
-        <button class="btn" :disabled="updater.busy" @click="updater.checkForUpdates(true)">{{ updater.status === "checking" ? "检查中…" : "检查更新" }}</button>
-        <button v-if="updater.available && !updater.runtime?.portable" class="btn primary" :disabled="updater.busy" @click="updater.install">{{ updater.status === "downloading" ? "正在安装…" : "下载并安装" }}</button>
-        <button v-if="updater.available || updater.runtime?.portable" class="btn" @click="updater.openRelease">打开 Release</button>
-        <button v-if="updater.status === 'ready-to-restart'" class="btn primary" @click="updater.relaunch">重启并完成更新</button>
+        <button class="btn" :disabled="updater.busy" @click="updater.checkForUpdates(true)">
+          {{ updater.status === "checking" ? "检查中…" : "检查更新" }}
+        </button>
+        <button
+          v-if="updater.available && !updater.runtime?.portable"
+          class="btn primary"
+          :disabled="updater.busy"
+          @click="updater.install"
+        >
+          {{ updater.status === "downloading" ? "正在安装…" : "下载并安装" }}
+        </button>
+        <button
+          v-if="updater.available || updater.runtime?.portable"
+          class="btn"
+          @click="updater.openRelease"
+        >
+          打开 Release
+        </button>
+        <button
+          v-if="updater.status === 'ready-to-restart'"
+          class="btn primary"
+          @click="updater.relaunch"
+        >
+          重启并完成更新
+        </button>
       </div>
     </div>
 
@@ -494,7 +585,8 @@ async function runPendingConfirm() {
       <h3>数据目录</h3>
       <p class="settings-path">{{ settings.config.dataDir }}</p>
       <div class="settings-migrate">
-        <input v-model="target" class="input" placeholder="输入新的绝对目录" />
+        <input v-model="target" class="input" placeholder="输入新的绝对目录，或点右侧选择" />
+        <button class="btn" @click="chooseTarget">选择目录</button>
         <button class="btn" :disabled="!target" @click="migrate">迁移</button>
       </div>
     </div>
@@ -523,7 +615,9 @@ async function runPendingConfirm() {
         <button class="btn" :disabled="dataBusy" @click="createBackup">创建备份</button>
         <button class="btn" :disabled="dataBusy" @click="openDataDir">打开数据目录</button>
       </div>
-      <p v-if="dataMessage" class="settings-message data-message" role="status">{{ dataMessage }}</p>
+      <p v-if="dataMessage" class="settings-message data-message" role="status">
+        {{ dataMessage }}
+      </p>
       <p v-if="dataError" class="update-error" role="alert">{{ dataError }}</p>
       <div v-if="recentBackups.length" class="backup-list">
         <div class="backup-row" v-for="backup in recentBackups" :key="backup.path">
@@ -537,25 +631,19 @@ async function runPendingConfirm() {
     <div class="settings-section">
       <div class="trash-heading">
         <h3>回收站</h3>
-        <button
-          v-if="trashCount > 0"
-          class="btn danger compact"
-          @click="clearTrash"
-        >
+        <button v-if="trashCount > 0" class="btn danger compact" @click="clearTrash">
           清空回收站 ({{ trashCount }})
         </button>
       </div>
       <div class="trash-list">
         <template v-for="group in trashGroups" :key="group.kind">
-          <div
-            v-for="row in trash?.[group.key] ?? []"
-            :key="row.id"
-            class="trash-row"
-          >
+          <div v-for="row in trash?.[group.key] ?? []" :key="row.id" class="trash-row">
             <span class="trash-kind">{{ group.label }}</span>
             <span class="trash-title">{{ row.title }}</span>
             <div class="trash-actions">
-              <button class="btn compact" @click="action(group.kind, row.id, 'trash_restore')">恢复</button>
+              <button class="btn compact" @click="action(group.kind, row.id, 'trash_restore')">
+                恢复
+              </button>
               <button
                 class="btn danger compact"
                 @click="permanentlyDelete(group.kind, row.id, row.title)"
@@ -565,12 +653,7 @@ async function runPendingConfirm() {
             </div>
           </div>
         </template>
-        <p
-          v-if="trash && trashCount === 0"
-          class="settings-empty"
-        >
-          回收站为空
-        </p>
+        <p v-if="trash && trashCount === 0" class="settings-empty">回收站为空</p>
       </div>
     </div>
   </section>

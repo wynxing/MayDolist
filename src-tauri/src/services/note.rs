@@ -25,30 +25,64 @@ pub struct NoteService {
     /// Serializes read-modify-write so concurrent content and bounds updates
     /// cannot overwrite each other with stale whole-note snapshots.
     write_lock: Mutex<()>,
+    /// Full on-disk notes (including deleted). Invalidated on every write so
+    /// readers (focus overview, palette, floating windows) do not rescan JSON.
+    cache: Mutex<NoteCache>,
+}
+
+/// Shared read projections of the note data, handed out as `Arc` clones so
+/// frequent readers never deep-clone the whole list.
+#[derive(Default)]
+struct NoteCache {
+    full: Option<Arc<Vec<Note>>>,
+    visible: Option<Arc<Vec<Note>>>,
 }
 impl NoteService {
     pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
             write_lock: Mutex::new(()),
+            cache: Mutex::new(NoteCache::default()),
         }
     }
-    pub fn list(&self, include_deleted: bool) -> AppResult<Vec<Note>> {
-        let mut notes: Vec<Note> = self.storage.list_json("notes")?;
-        if !include_deleted {
-            notes.retain(|v| !v.deleted);
+    pub fn invalidate_cache(&self) {
+        if let Ok(mut guard) = self.cache.lock() {
+            *guard = NoteCache::default();
         }
-        notes.sort_by(|a, b| {
-            b.pinned
-                .cmp(&a.pinned)
-                .then_with(|| b.updated_at.cmp(&a.updated_at))
-        });
-        Ok(notes)
+    }
+    pub fn list(&self, include_deleted: bool) -> AppResult<Arc<Vec<Note>>> {
+        let mut guard = self
+            .cache
+            .lock()
+            .map_err(|_| AppError::Internal("note cache lock poisoned".into()))?;
+        if include_deleted {
+            if guard.full.is_none() {
+                let loaded: Vec<Note> = self.storage.list_json("notes")?;
+                guard.full = Some(Arc::new(loaded));
+            }
+            return Ok(guard.full.clone().expect("full cache populated"));
+        }
+        if guard.visible.is_none() {
+            if guard.full.is_none() {
+                let loaded: Vec<Note> = self.storage.list_json("notes")?;
+                guard.full = Some(Arc::new(loaded));
+            }
+            let full = guard.full.clone().expect("full cache populated");
+            let mut visible: Vec<Note> = full.iter().filter(|v| !v.deleted).cloned().collect();
+            visible.sort_by(|a, b| {
+                b.pinned
+                    .cmp(&a.pinned)
+                    .then_with(|| b.updated_at.cmp(&a.updated_at))
+            });
+            guard.visible = Some(Arc::new(visible));
+        }
+        Ok(guard.visible.clone().expect("visible cache populated"))
     }
     pub fn get(&self, id: &str) -> AppResult<Note> {
         self.list(true)?
-            .into_iter()
+            .iter()
             .find(|v| v.id == id)
+            .cloned()
             .ok_or_else(|| AppError::NotFound(format!("note {id}")))
     }
     pub fn create(&self, title: String, content: String) -> AppResult<Note> {
@@ -134,10 +168,14 @@ impl NoteService {
             .write_lock
             .lock()
             .map_err(|_| AppError::Internal("note write lock poisoned".into()))?;
-        self.storage.delete_entity("notes", id)
+        self.storage.delete_entity("notes", id)?;
+        self.invalidate_cache();
+        Ok(())
     }
     fn save(&self, note: &Note) -> AppResult<()> {
-        self.storage.save_entity("notes", &note.id, note)
+        self.storage.save_entity("notes", &note.id, note)?;
+        self.invalidate_cache();
+        Ok(())
     }
 }
 
@@ -147,17 +185,18 @@ mod tests {
     use crate::models::WindowBounds;
     use std::sync::Arc;
 
-    fn temp_service(tag: &str) -> (std::path::PathBuf, NoteService) {
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-note-{}-{}", tag, uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
-        (dir, NoteService::new(storage))
+    fn temp_service(tag: &str) -> (tempfile::TempDir, NoteService) {
+        let tmp = tempfile::Builder::new()
+            .prefix(&format!("maydolist-note-{tag}-"))
+            .tempdir()
+            .unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
+        (tmp, NoteService::new(storage))
     }
 
     #[test]
     fn concurrent_content_and_bounds_updates_preserve_both() {
-        let (dir, service) = temp_service("rmw");
+        let (_tmp, service) = temp_service("rmw");
         let service = Arc::new(service);
         let note = service.create("title".into(), "initial".into()).unwrap();
         let id = note.id.clone();
@@ -209,6 +248,5 @@ mod tests {
             final_note.window_bounds.is_some(),
             "window_bounds lost to content RMW"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -176,6 +176,18 @@ pub fn palette_commands() -> Vec<PaletteCommand> {
             "在资源管理器中打开本地数据目录",
             &["data", "数据目录", "打开", "目录"],
         ),
+        command(
+            "refresh-github",
+            "刷新 GitHub",
+            "重新拉取全部追踪仓库的 PR / Issue",
+            &["github", "刷新", "refresh", "pr", "issue"],
+        ),
+        command(
+            "open-quick-capture",
+            "打开快速收集",
+            "呼出快速收集窗口记录想法",
+            &["quick", "快速收集", "捕获", "记录"],
+        ),
     ]
 }
 
@@ -470,6 +482,16 @@ mod tests {
         assert_eq!(commands.len(), palette_commands().len());
         assert_eq!(commands[0].id, "go-focus");
         assert_eq!(commands[8].id, "open-data-dir");
+        assert_eq!(commands[9].id, "refresh-github");
+        assert_eq!(commands[10].id, "open-quick-capture");
+    }
+
+    #[test]
+    fn github_refresh_and_quick_capture_commands_match() {
+        let refresh = match_commands("刷新 github");
+        assert_eq!(refresh[0].id, "refresh-github");
+        let capture = match_commands("快速收集");
+        assert_eq!(capture[0].id, "open-quick-capture");
     }
 
     #[test]
@@ -624,25 +646,20 @@ mod tests {
 
     #[test]
     fn empty_query_returns_commands_only() {
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-palette-empty-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
         let services = Services::new(storage.clone());
         let result = services.palette.search("");
         assert!(!result.commands.is_empty());
         assert!(result.todos.is_empty());
         assert!(result.notes.is_empty());
         assert!(result.github.is_empty());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn search_aggregates_real_data_across_domains() {
-        let dir =
-            std::env::temp_dir().join(format!("maydolist-palette-data-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
         let services = Services::new(storage.clone());
 
         let inbox = services.todo.ensure_inbox().unwrap();
@@ -701,17 +718,12 @@ mod tests {
 
         let commands = services.palette.search("备份");
         assert_eq!(commands.commands[0].id, "backup-now");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn search_marks_offline_cache_from_snapshot_error() {
-        let dir = std::env::temp_dir().join(format!(
-            "maydolist-palette-offline-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let storage = Arc::new(Storage::with_dir(&dir).unwrap());
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
         let services = Services::new(storage.clone());
 
         let mut snap = snapshot("owner/repo");
@@ -744,6 +756,5 @@ mod tests {
             result.github_offline,
             "a snapshot carrying lastError must mark the section offline"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

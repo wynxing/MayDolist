@@ -9,7 +9,13 @@ import { useGithubStore } from "../stores/github";
 import { useNoteStore } from "../stores/note";
 import { useTodoStore } from "../stores/todo";
 import { signalBadges } from "../signals";
-import type { FocusGithub, FocusNote, FocusSection, FocusTodo, FocusTodoSection } from "../types/focus";
+import type {
+  FocusGithub,
+  FocusNote,
+  FocusSection,
+  FocusTodo,
+  FocusTodoSection,
+} from "../types/focus";
 import type { RepeatRule, TodoSource } from "../types/todo";
 
 const emit = defineEmits<{ navigate: [tab: string] }>();
@@ -31,16 +37,11 @@ const filterLabels = [
 
 onMounted(() => void focus.init());
 
-const todoSection = computed<FocusTodoSection | null>(
-  () => focus.overview?.todo ?? null
-);
+const todoSection = computed<FocusTodoSection | null>(() => focus.overview?.todo ?? null);
 const shownTodoCount = computed(
-  () =>
-    todoSection.value?.groups.reduce((sum, group) => sum + group.items.length, 0) ?? 0
+  () => todoSection.value?.groups.reduce((sum, group) => sum + group.items.length, 0) ?? 0
 );
-const noteSection = computed<FocusSection<FocusNote> | null>(
-  () => focus.overview?.note ?? null
-);
+const noteSection = computed<FocusSection<FocusNote> | null>(() => focus.overview?.note ?? null);
 const githubSection = computed<FocusSection<FocusGithub> | null>(
   () => focus.overview?.github ?? null
 );
@@ -182,7 +183,6 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
   };
   return labels[repeat];
 }
-
 </script>
 
 <template>
@@ -320,14 +320,17 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                 <small v-if="item.preview" class="focus-item-preview">{{ item.preview }}</small>
                 <small class="focus-item-meta">{{ formatTime(item.updatedAt) }}</small>
               </button>
-              <button class="btn ghost compact row-actions" type="button" title="悬浮" @click="floatNote(item)">
+              <button
+                class="btn ghost compact row-actions"
+                type="button"
+                title="悬浮"
+                @click="floatNote(item)"
+              >
                 悬浮
               </button>
             </li>
           </ul>
-          <p v-else-if="!noteSection?.error" class="focus-empty">
-            暂无置顶或最近更新的便签
-          </p>
+          <p v-else-if="!noteSection?.error" class="focus-empty">暂无置顶或最近更新的便签</p>
         </section>
 
         <section class="focus-section glass-card" aria-labelledby="focus-github-title">
@@ -338,18 +341,26 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                 {{ githubSection.total }} 条需要行动
               </span>
             </div>
-            <button class="btn ghost compact" type="button" @click="go('github')">进入 GitHub</button>
+            <button class="btn ghost compact" type="button" @click="go('github')">
+              进入 GitHub
+            </button>
           </header>
 
           <p v-if="githubSection?.error" class="error" role="alert">
             部分 GitHub 数据加载失败：{{ githubSection.error }}
           </p>
           <p v-if="githubSection?.offlineCache" class="focus-cache-hint" role="status">
-            {{ githubSection.items.length ? "离线 / 未登录：展示本地缓存" : "离线 / 未登录：暂无缓存" }}
+            {{
+              githubSection.items.length ? "离线 / 未登录：展示本地缓存" : "离线 / 未登录：暂无缓存"
+            }}
           </p>
 
           <ul v-if="githubSection?.items.length" class="focus-list">
-            <li v-for="item in githubSection.items" :key="`${item.repo}-${item.kind}-${item.number}`" class="focus-item">
+            <li
+              v-for="item in githubSection.items"
+              :key="`${item.repo}-${item.kind}-${item.number}`"
+              class="focus-item"
+            >
               <button class="focus-item-main" type="button" @click="openGithub(item)">
                 <span class="focus-item-title" :title="item.title">
                   <span class="focus-badge" :class="item.kind">{{ githubBadge(item) }}</span>
@@ -366,7 +377,9 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
                 <small class="focus-item-meta">
                   {{ item.repo }} · 更新 {{ formatTime(item.updatedAt) }}
                 </small>
-                <small v-if="githubSource(item)" class="focus-item-source">{{ githubSource(item) }}</small>
+                <small v-if="githubSource(item)" class="focus-item-source">{{
+                  githubSource(item)
+                }}</small>
               </button>
               <button
                 class="btn ghost compact row-actions"
@@ -378,10 +391,11 @@ function repeatLabel(repeat: RepeatRule | null | undefined) {
               </button>
             </li>
           </ul>
-          <p v-else-if="!githubSection?.error" class="focus-empty">
-            暂无需要行动的 GitHub 条目
-          </p>
-          <p v-if="githubSection && githubSection.total > githubSection.items.length" class="focus-more">
+          <p v-else-if="!githubSection?.error" class="focus-empty">暂无需要行动的 GitHub 条目</p>
+          <p
+            v-if="githubSection && githubSection.total > githubSection.items.length"
+            class="focus-more"
+          >
             还有 {{ githubSection.total - githubSection.items.length }} 项，进入 GitHub 查看
           </p>
         </section>

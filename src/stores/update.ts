@@ -4,11 +4,7 @@ import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updat
 import { relaunch } from "@tauri-apps/plugin-process";
 import { call } from "../api";
 import * as api from "../api/update";
-import type {
-  AvailableUpdate,
-  UpdateRuntimeInfo,
-  UpdateStatus,
-} from "../types/update";
+import type { AvailableUpdate, UpdateRuntimeInfo, UpdateStatus } from "../types/update";
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LAST_CHECK_KEY = "maydolist.update.lastCheckAt";
@@ -26,9 +22,7 @@ export const useUpdateStore = defineStore("update", () => {
   let pendingUpdate: Update | null = null;
   let initPromise: Promise<void> | null = null;
 
-  const busy = computed(() =>
-    ["checking", "downloading"].includes(status.value)
-  );
+  const busy = computed(() => ["checking", "downloading"].includes(status.value));
   const downloadPercent = computed(() =>
     downloadTotal.value && downloadTotal.value > 0
       ? Math.min(100, Math.round((downloadedBytes.value / downloadTotal.value) * 100))

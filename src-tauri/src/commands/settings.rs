@@ -1,6 +1,8 @@
 use crate::{
     error::{AppError, AppResult},
-    models::config::{GLASS_OPACITY_MAX, GLASS_OPACITY_MIN},
+    models::config::{
+        GLASS_OPACITY_MAX, GLASS_OPACITY_MIN, TRIAGE_LATER_DAYS_MAX, TRIAGE_LATER_DAYS_MIN,
+    },
     models::AppConfig,
     AppState,
 };
@@ -26,6 +28,16 @@ fn validate_glass_opacity(config: &AppConfig) -> AppResult<()> {
     Ok(())
 }
 
+fn validate_triage_later_days(config: &AppConfig) -> AppResult<()> {
+    if !(TRIAGE_LATER_DAYS_MIN..=TRIAGE_LATER_DAYS_MAX).contains(&config.triage_later_days) {
+        return Err(AppError::InvalidInput(format!(
+            "triageLaterDays must be between {} and {}",
+            TRIAGE_LATER_DAYS_MIN, TRIAGE_LATER_DAYS_MAX
+        )));
+    }
+    Ok(())
+}
+
 fn sanitize_config(mut config: AppConfig) -> AppConfig {
     config.sanitize();
     config
@@ -43,6 +55,7 @@ pub fn settings_update(
 ) -> AppResult<AppConfig> {
     let config = sanitize_config(config);
     validate_glass_opacity(&config)?;
+    validate_triage_later_days(&config)?;
     crate::app::apply_hotkeys(&app, &config)?;
     state.storage.save_config(&config)?;
     app.emit("settings-changed", config.clone())
@@ -108,5 +121,21 @@ mod tests {
         let err = validate_glass_opacity(&config_with(0.5, 1.01)).unwrap_err();
         assert!(matches!(err, AppError::InvalidInput(_)));
         assert!(err.to_string().contains("floatingNoteGlassOpacity"));
+    }
+
+    #[test]
+    fn validates_triage_later_days_range() {
+        let in_range = AppConfig {
+            triage_later_days: 7,
+            ..Default::default()
+        };
+        assert!(validate_triage_later_days(&in_range).is_ok());
+        let out_of_range = AppConfig {
+            triage_later_days: 31,
+            ..Default::default()
+        };
+        let err = validate_triage_later_days(&out_of_range).unwrap_err();
+        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(err.to_string().contains("triageLaterDays"));
     }
 }

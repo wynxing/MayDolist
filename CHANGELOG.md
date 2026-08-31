@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- Make inbox triage "later" days configurable (1–30, default 3).
+- Quick capture: `/note 标题` creates a titled note; date prefixes include next weekdays (`下周五`).
+- Extract Todo list/row/schedule/triage into reusable components.
+- Generate TypeScript types from Rust models (ts-rs) and fail CI when they drift.
+- Add Prettier checks; split the Rust app and GitHub service into modules.
+
 ## 1.3.0
 
 - Sync GitHub PR / Issue source states into linked Todo items.
@@ -19,4 +27,7 @@
 
 ## 1.2.2
 
-- Inbox triage, command palette, due dates / reminders, and GitHub action signals.
+- Inbox triage 逐条处理模式：`1`-`5` 快捷键（今天做 / 稍后做 / 转列表 / 完成 / 删除）将收件箱归零。
+- 全局命令面板（Ctrl+K）：切换视图、新建 Todo / 便签、立即备份、打开数据目录，并即搜即得 Todo / 便签 / GitHub 三个域。
+- Todo 支持到期日、提醒时间与周期规则，配本地 Windows 通知与托盘徽标。
+- GitHub 追踪行动信号：需要处理、需要 Review、CI 失败、长期未更新、Draft 等。

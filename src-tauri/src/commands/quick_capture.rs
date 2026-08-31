@@ -19,7 +19,8 @@ pub struct QuickCaptureResult {
 }
 
 /// Split a quick capture input into its kind and trimmed content.
-/// `/note` opens a new blank floating note. `todo:` remains an optional Todo
+/// `/note` opens a new floating note; a trailing title (`/note 想法`)
+/// creates the note with that title. `todo:` remains an optional Todo
 /// prefix; all other text, including the former `note:` syntax, creates a Todo.
 pub fn parse_quick_capture(input: &str) -> Result<(&'static str, &str), AppError> {
     let trimmed = input.trim();
@@ -30,13 +31,11 @@ pub fn parse_quick_capture(input: &str) -> Result<(&'static str, &str), AppError
     if lower == "/note" {
         return Ok(("note", ""));
     }
-    if lower
-        .strip_prefix("/note")
-        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
-    {
-        return Err(AppError::InvalidInput(
-            "请输入单独的 /note 以打开空白悬浮便签".into(),
-        ));
+    if let Some(rest) = lower.strip_prefix("/note") {
+        if rest.starts_with(char::is_whitespace) {
+            // `/note <title>`: the remainder becomes the note title.
+            return Ok(("note", trimmed["/note".len()..].trim()));
+        }
     }
     let (kind, rest) = if lower.starts_with("todo:") {
         ("todo", &trimmed["todo:".len()..])
@@ -52,8 +51,8 @@ pub fn parse_quick_capture(input: &str) -> Result<(&'static str, &str), AppError
 
 /// Parse a leading natural-language due-date token from a quick capture
 /// input. Supported minimal grammar: `明天` / `今天` / `后天` / `周X` /
-/// `星期X` (X = 一..六日天) / `N天后` (1..=365) / `月底` / `月末`. A token
-/// must be followed by whitespace or the end of input so words like
+/// `星期X` / `下周X` (X = 一..六日天) / `N天后` (1..=365) / `月底` / `月末`.
+/// A token must be followed by whitespace or the end of input so words like
 /// "明天性计划" never match. Returns the matched token and the due date, or
 /// `None` — callers degrade to a plain Todo.
 pub fn parse_quick_capture_due(input: &str, today: NaiveDate) -> Option<(String, NaiveDate)> {
@@ -94,7 +93,8 @@ pub fn parse_quick_capture_due(input: &str, today: NaiveDate) -> Option<(String,
 
 fn parse_weekday_prefix(input: &str, today: NaiveDate) -> Option<(String, NaiveDate)> {
     const DAYS: [&str; 7] = ["一", "二", "三", "四", "五", "六", "日"];
-    for prefix in ["星期", "周"] {
+    // `下周X` resolves the same weekday shifted one full week later.
+    for (prefix, week_offset) in [("下周", 7i64), ("星期", 0), ("周", 0)] {
         let Some(rest) = input.strip_prefix(prefix) else {
             continue;
         };
@@ -115,7 +115,7 @@ fn parse_weekday_prefix(input: &str, today: NaiveDate) -> Option<(String, NaiveD
         if ahead == 0 {
             ahead = 7;
         }
-        return Some((token, today + Duration::days(ahead)));
+        return Some((token, today + Duration::days(ahead + week_offset)));
     }
     None
 }
@@ -187,7 +187,12 @@ pub async fn quick_capture_submit(
             })
         }
         _ => {
-            let note = state.services.note.create("新便签".into(), String::new())?;
+            let title = if content.is_empty() {
+                "新便签".to_string()
+            } else {
+                content.to_string()
+            };
+            let note = state.services.note.create(title, String::new())?;
             let note = match state.services.note.update(
                 &note.id,
                 crate::services::note::NotePatch {
@@ -225,6 +230,11 @@ pub async fn quick_capture_submit(
 #[tauri::command]
 pub fn quick_capture_hide(app: AppHandle) -> AppResult<()> {
     crate::app::hide_quick_capture(&app)
+}
+
+#[tauri::command]
+pub fn quick_capture_show(app: AppHandle) -> AppResult<()> {
+    crate::app::show_quick_capture(&app)
 }
 
 #[cfg(test)]
@@ -278,8 +288,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_note_command_with_arguments() {
-        assert!(parse_quick_capture("/note 写点什么").is_err());
+    fn note_command_with_title_creates_note() {
+        assert_eq!(
+            parse_quick_capture("/note 写点什么").unwrap(),
+            ("note", "写点什么")
+        );
+        assert_eq!(
+            parse_quick_capture("  /note   前后空格  ").unwrap(),
+            ("note", "前后空格")
+        );
     }
 
     #[test]
@@ -377,9 +394,29 @@ mod tests {
             date("2026-08-13")
         );
         // Unsupported patterns degrade to None.
-        assert_eq!(parse_quick_capture_due("下周五 开会", today), None);
         assert_eq!(parse_quick_capture_due("0天后 无效", today), None);
         assert_eq!(parse_quick_capture_due("400天后 超限", today), None);
         assert_eq!(parse_quick_capture_due("", today), None);
+    }
+
+    #[test]
+    fn parses_next_weekday_tokens() {
+        // 2026-08-12 is a Wednesday (周三).
+        let today = date("2026-08-12");
+        assert_eq!(
+            parse_quick_capture_due("下周五 开会", today).unwrap(),
+            ("下周五".to_string(), date("2026-08-21"))
+        );
+        assert_eq!(
+            parse_quick_capture_due("下周三 周报", today).unwrap(),
+            ("下周三".to_string(), date("2026-08-26"))
+        );
+        assert_eq!(
+            parse_quick_capture_due("下周日 休息", today).unwrap(),
+            ("下周日".to_string(), date("2026-08-23"))
+        );
+        // `下周` without a valid weekday stays plain text.
+        assert_eq!(parse_quick_capture_due("下周计划", today), None);
+        assert_eq!(parse_quick_capture_due("下周周会", today), None);
     }
 }

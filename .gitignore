@@ -35,5 +35,8 @@ src-tauri/target
 .env
 .env.*
 
+# Issue drafting workspace
+.issue-drafts/
+
 # Prototypes (试水产物，不入库)
 prototypes/
