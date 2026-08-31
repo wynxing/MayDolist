@@ -85,7 +85,7 @@ mod tests {
         let rgba = badge.rgba();
         assert_eq!(rgba.len(), 16 * 16 * 4);
         assert!(
-            rgba.chunks_exact(4).any(|p| p[3] != 0),
+            rgba.as_chunks::<4>().0.iter().any(|p| p[3] != 0),
             "badge must contain visible pixels"
         );
     }
@@ -108,6 +108,6 @@ mod tests {
         // `draw_overdue_badge(0)` shows "0" — used only while a count exists;
         // the tray is reset to the default icon when the count reaches 0.
         let badge = draw_overdue_badge(0);
-        assert!(badge.rgba().chunks_exact(4).any(|p| p[0] == 232));
+        assert!(badge.rgba().as_chunks::<4>().0.iter().any(|p| p[0] == 232));
     }
 }
