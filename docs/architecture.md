@@ -233,4 +233,3 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 - [README](../README.md)：产品、开发运行、质量检查。
 - [building.md](building.md)：CI、NSIS、Release 签名与 updater。
 - [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.1`）。
-- [issue-tracker.md](issue-tracker.md)：已完成的 issue 编排日志（归档，不是活任务板）。
