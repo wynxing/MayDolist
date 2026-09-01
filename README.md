@@ -142,22 +142,28 @@ flowchart LR
 
 ## 项目结构
 
+与 [docs/architecture.md](docs/architecture.md) 同一棵树。改行为时从那篇的「代码地图」对到文件。
+
 ```text
-src/
-  api/                 Tauri command 的前端封装
-  stores/              Pinia 状态
-  views/               今日、Todo、便签、GitHub、设置、快速收集和命令面板
-  types/               与 Rust model 对应的 TypeScript 类型
+src/                              Vue 3 + TS
+  App.vue                         ?note / ?quick / ?palette 分流四个窗口
+  views/  stores/  api/  components/
+  types/generated/                ts-rs 从 Rust models 生成
+  triage.ts                       Inbox 处理模式（纯前端）
 src-tauri/src/
-  commands/            Tauri command 接口
-  services/            Todo、便签、GitHub、Focus、提醒、备份和命令面板搜索服务
-  models/              serde 数据模型
-  storage/             数据目录、原子写入和迁移
-  demo.rs              截图用的隔离模拟数据
+  lib.rs                          AppState + 全部 Tauri command
+  commands/                       IPC：校验后转 service
+  services/                       todo / note / github / focus / palette / backup
+  services/reminder.rs            到期判定（纯函数）；循环在 app/due_tracking.rs
+  models/                         serde 模型
+  storage/                        数据目录与原子写
+  app/                            窗口、托盘、热键、热角、徽标、后台循环
+  events/                         entity-changed
+  demo.rs                         --demo 隔离模拟数据
 docs/
-  architecture.md     详细架构说明
-  building.md          构建与发布说明
-  screenshots/         README 展示截图
+  architecture.md                 现行系统地图
+  building.md                     构建与发布
+  screenshots/                    README 截图
 ```
 
 ## 隐私边界
@@ -188,7 +194,7 @@ pnpm gen:types
 
 ## 项目状态
 
-当前版本：`1.3.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现；详细设计记录和演进说明见 [docs/architecture.md](docs/architecture.md)。
+当前版本：`1.3.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
 
 ## License
 

@@ -1,9 +1,9 @@
 # Issue 执行进度跟踪
 
-> 每个 issue 一轮独立对话。新对话开场先读本文件 + 目标 issue 全文 + 最新 `main`。
-> 完成标准：自动化校验全绿（`pnpm check` / `pnpm build` / `cargo fmt` / `cargo clippy` / `cargo test`）、PR 合并、issue 自动关闭。
-
-> 编排模式：由「巡检控制器」每小时兜底巡检 + 每轮线程即时串联（用 create_thread 创建下一轮）。tracker 的 activeThreadId 由创建者写入、完成者清除；控制器据此去重。
+> **归档。** 表内 issue（#16–#21、#28–#30）均已合并关闭。这不是活任务板，新工作不要以本文件为开场必读。
+> 现行架构见 [architecture.md](architecture.md)；版本演进见 [CHANGELOG](../CHANGELOG.md)。
+>
+> 下文保留 2026-08 自动化编排的完成记录，供核对历史 PR。
 
 ## 总体安排
 

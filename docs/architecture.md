@@ -1,486 +1,236 @@
-# MayDolist 架构文档
+# MayDolist 架构
 
-> 状态：设计基线 · 最后更新：2026-08-13
+> 现行系统地图 · 对照代码 `1.3.1` · 2026-09-01
+>
+> 产品体验见 [README](../README.md)。字段以 `src-tauri/src/models/` 为准，改模型后跑 `pnpm gen:types` 并提交 `src/types/generated/`。
 
-本文档描述 MayDolist 的系统架构与关键设计决策，作为后续实现与迭代的设计基线。文档只做设计陈述，不包含实现代码；实际实现以其为准，如需调整设计，请先更新本文档并记录 ADR。
+Windows 本地桌面收件箱：1 个 Rust 主进程 + 多个 WebView2（主面板、悬浮便签、快速收集、命令面板）。前端不碰磁盘；GitHub 只通过本机 `gh` CLI。
 
-## 1. 背景与目标
+## 目录
 
-MayDolist 是一款面向 Windows 的**本地优先开发者行动收件箱**。它平时隐藏在屏幕角落与系统托盘，鼠标划过热角或按全局快捷键即可呼出主面板，集 Todo 待办、桌面悬浮便签、按项目追踪的 GitHub PR / Issue、标签速记于一体；产品围绕「捕获 → 判断下一步 → 执行 → 回到来源」的闭环演进，让待办、笔记与开发进度都收纳在一个随时可唤出的面板里。
+- [分层与数据流](#分层与数据流)
+- [代码地图](#代码地图)
+- [模块](#模块)
+- [存储](#存储)
+- [运行时](#运行时)
+- [设计不变量](#设计不变量)
+- [相关文档](#相关文档)
 
-### 1.1 产品定位
-
-- **形态**：Windows 桌面优先的轻量行动收件箱，可随时收起（热角 / 托盘 / 全局快捷键），数据只存本机。
-- **对象**：日常使用 GitHub、希望在开发工作流中快速跟进 PR / issue 的开发者。
-- **价值**：用快速收集降低捕获成本，用 Focus / 今日视图聚合真正需要行动的内容，用 GitHub 来源关联保留开发上下文，用本地数据与可导出备份建立长期信任。
-
-### 1.2 产品目标
-
-- 提供一个随时可唤出的主面板，收纳待办、便签、GitHub 进度与速记。
-- 便签可拖出为独立桌面悬浮小窗（置顶、可收起），贴近系统原生体验。
-- GitHub 追踪按项目（仓库）分组并可折叠；默认展示过滤器命中的 PR / Issue，支持忽略与 `#xx` 手动钉住。
-- 所有数据保存在本机，数据目录可配置，离线可查看缓存。
-
-### 1.3 目标用户
-
-- Windows 桌面用户（Windows 10+，依赖 WebView2）。
-- 日常使用 GitHub、希望在工作流中快速跟进 PR / issue 的开发者。
-- 偏好本地优先、不依赖云账号的轻量效率工具用户。
-
-### 1.4 非目标（明确不做）
-
-- 不引入云同步与多端同步（数据仅存本机，不做移动端 / Web 端）。
-- 不在应用内嵌入 GitHub 登录，也不读取 / 存储 GitHub token（登录统一走 `gh auth login`，凭据由 gh CLI 持有）。
-- 不把本地 JSON 存储整体迁移到数据库；现有领域模型与字段保持向后兼容，新增字段一律可选 + serde 默认值。
-- 不做完整的 GitHub 管理能力（不创建 PR、不合并、不评论），只做只读追踪与跳转浏览器。
-- 不变成完整项目管理工具，不引入复杂依赖、里程碑或团队协作。
-
-### 1.5 设计原则
-
-1. 保持 Windows 桌面优先、轻量、可随时收起的体验。
-2. 保持本地优先，不引入云同步、移动端或内嵌 GitHub 登录。
-3. Todo、Note、GitHub 保留各自领域模型；跨模块通过可选来源引用（`TodoSource`）、GitHub 来源同步元数据和只读聚合投影（Focus）连接。
-4. 所有新数据字段必须向后兼容：serde 默认值 + `schemaVersion` / `packageSchemaVersion` 迁移，旧数据按旧逻辑读取。
-5. 每个阶段都必须有可验证的正常、边界和异常路径（见 §10 验收标准与各轮单元测试）。
-
-## 2. 现状与边界
-
-### 2.1 当前状态
-
-- 正式实现骨架已落地：仓库根目录为 Tauri 2 + Vue 3 + TS 项目（`src/` 前端与 `src-tauri/` 后端）。
-- v1.0 已实现真实业务：`todo` / `note` / `github` 均为 JSON 原子持久化与真实 gh 调用；托盘、全局热键、多显示器热角、悬浮便签、数据迁移与开机自启均已落地。
-- `prototypes/` 下有三个最小毛玻璃原型（Tauri + Vue、Slint、Iced），仅用于肉眼对比质感与开发手感，已 gitignore，不入库。
-- 本文档为正式实现提供设计基线，骨架实现与之保持模块边界一致。
-
-### 2.2 系统边界
-
-| 边界 | 说明 |
-| --- | --- |
-| 运行平台 | 单机 Windows（Windows 10+，依赖系统 WebView2） |
-| 数据存储 | 本地 JSON 文件，目录可配置 |
-| GitHub 通道 | 唯一通道为 gh CLI（`gh api` / `gh auth status`） |
-| 网络 | 仅 GitHub API 访问；离线时回退本地缓存 |
-| 凭据 | GitHub 凭据仅由 gh CLI 持有，应用不读取、不存储 token |
-
-## 3. 总体架构
-
-### 3.1 技术栈
-
-- **UI 层**：Vue 3 + TypeScript（全部界面由 Vue 承担）。
-- **构建 / 开发工具链**：Vite（开发热更新与生产打包），由 Tauri 前端脚手架标准提供。
-- **系统层**：Rust（Tauri 2 后端），负责窗口、托盘、热键、热角、原子写盘与 gh 调用。
-- **进程模型**：1 个 Rust 主进程 + N 个 WebView2 渲染进程（主面板与每个悬浮便签窗各一个渲染进程）。
-
-### 3.2 分层架构
+## 分层与数据流
 
 ```mermaid
 flowchart TB
-    subgraph UI["Vue 3 + TS 前端层"]
-        Main["主面板（Focus / Todo / 便签 / GitHub / 设置）"]
-        Note["悬浮便签窗（可多开）"]
-        Quick["快速收集窗（轻量输入）"]
-        Palette["命令面板窗（Ctrl+K 全局搜索 / 命令）"]
+    subgraph vue [Vue 3]
+        Views[views]
+        Stores[Pinia stores]
+        Api[src/api invoke]
     end
-
-    subgraph Rust["Rust 系统层（Tauri 2）"]
-        Cmd["Tauri Commands"]
-        App["app（窗口 / 托盘 / 热角 / 快捷键）"]
-        Store["storage（原子读写）"]
-        Gh["github（gh 封装与缓存）"]
-        Evt["events（跨窗口事件广播）"]
+    subgraph rust [Rust / Tauri 2]
+        Cmd[commands]
+        Svc[services]
+        App[app 窗口壳]
+        Store[storage]
     end
-
-    subgraph Infra["基础设施"]
-        FS["JSON 文件存储"]
-        GhCli["gh CLI"]
-        OS["Windows 集成（托盘 / 热键 / WebView2）"]
-    end
-
-    Main -->|invoke / 事件| Cmd
-    Note -->|invoke / 事件| Cmd
-    Quick -->|invoke / 事件| Cmd
-    Palette -->|invoke / 事件| Cmd
+    Views --> Stores
+    Stores --> Api
+    Views --> Api
+    Api -->|invoke| Cmd
+    Cmd --> Svc
     Cmd --> App
-    Cmd --> Store
-    Cmd --> Gh
-    Cmd --> Evt
-    Store --> FS
-    Gh --> GhCli
-    App --> OS
+    Svc --> Store
+    App --> Svc
+    Store --> FS[本地 JSON]
+    Svc --> GhCli[gh CLI]
 ```
 
-### 3.3 进程模型
-
-```mermaid
-flowchart LR
-    Rust["Rust 主进程（Tauri 核心）"] --> W1["WebView2 渲染进程（主面板）"]
-    Rust --> W2["WebView2 渲染进程（悬浮便签 1）"]
-    Rust --> W3["WebView2 渲染进程（悬浮便签 N）"]
-    W1 -->|invoke / 事件| Rust
-    W2 -->|invoke / 事件| Rust
-    W3 -->|invoke / 事件| Rust
-    Rust -->|原子写| FS["JSON 文件存储"]
-    Rust -->|子进程调用| GhCli["gh CLI"]
-```
-
-### 3.4 数据流
-
-所有数据访问遵循固定方向：**UI → invoke → Command → Service → 原子写盘 → 事件广播回所有窗口**。
+固定方向：**UI → `invoke` → Command（校验）→ Service（规则）→ 原子写盘 → 事件广播**。Command 不写业务规则；前端不直接读写文件。
 
 ```mermaid
 sequenceDiagram
-    participant UI as Vue 前端
-    participant Cmd as Tauri Command
-    participant Svc as Rust Service
-    participant FS as JSON 文件
-    participant Evt as 事件广播
+    participant UI as Vue
+    participant Cmd as Command
+    participant Svc as Service
+    participant FS as JSON
+    participant Evt as 事件
 
-    UI->>Cmd: invoke("todo.create", payload)
-    Cmd->>Svc: 调用领域服务
-    Svc->>FS: 原子写盘
-    FS-->>Svc: 写盘结果
-    Svc-->>Cmd: 返回结果
-    Cmd-->>UI: 返回结果
-    Svc->>Evt: 广播数据变更
-    Evt-->>UI: 同步其他窗口
+    UI->>Cmd: invoke
+    Cmd->>Svc: 领域调用
+    Svc->>FS: 临时文件 + 重命名
+    Svc-->>Cmd: 结果
+    Cmd-->>UI: 返回
+    Svc->>Evt: entity-changed
+    Evt-->>UI: 各窗口 store 刷新
 ```
 
-### 3.5 产品闭环与模块关系
+## 代码地图
 
-产品按「捕获 → 判断下一步 → 执行 → 回到来源」闭环组织，各阶段由既有模块协作完成，不新增独立领域：
-
-```mermaid
-flowchart LR
-    subgraph C["捕获"]
-        QC["快速收集窗（普通文本 → 收件箱，/note → 悬浮便签）"]
-        MB["主面板 Todo / 便签 / GitHub「转为 Todo」"]
-    end
-    subgraph D["判断下一步"]
-        F["Focus 今日视图（逾期 > 今天 > 近期 > 无日期 / 置顶便签 / 可行动信号）"]
-        T["Inbox 处理模式（triage：1 今天做 / 2 稍后做 / 3 转列表 / 4 完成 / 5 删除）"]
-    end
-    subgraph A["执行"]
-        ACT["完成 Todo / 悬浮便签 / 进入对应模块"]
-    end
-    subgraph B["回到来源"]
-        SRC["TodoSource 徽标 + 打开来源"]
-    end
-    C --> D --> A --> B
-    B -.->|新上下文 / 新条目| C
+```text
+src/                              Vue 3 + TS
+  App.vue                         ?note / ?quick / ?palette 分流四个窗口
+  views/                          主面板 Tab、悬浮便签、快速收集、命令面板
+  stores/                         Pinia；跨窗口靠 entitySync 订 entity-changed
+  api/                            唯一 invoke 入口（call + ApiError）
+  components/                     列表行、triage、确认条等
+  types/                          手写窄化；generated/ 由 ts-rs 生成
+  triage.ts                       Inbox 处理模式（纯前端，不落盘）
+src-tauri/src/
+  lib.rs                          AppState；注册全部 Tauri command
+  commands/                       IPC：参数校验、错误转换，转给 service / app
+  services/                       领域：todo / note / github / focus / palette / backup
+  services/reminder.rs            到期判定纯函数（不在 Services 结构体里）
+  models/                         serde 模型；#[ts(export)] → src/types/generated/
+  storage/                        数据目录、原子写、config 缓存、域替换
+  app/                            窗口、托盘、热键、热角、徽标、后台循环
+  events/                         entity-changed
+  error.rs                        AppError → 前端 ErrorCode
+  logging.rs                      <dataDir>/logs/app.log
+  demo.rs                         --demo 隔离模拟数据
 ```
 
-| 阶段 | 入口 / 模块 | 说明 |
+改一类功能时进这些文件：
+
+| 想改 | Rust | 前端 |
 | --- | --- | --- |
-| 捕获 | `quick_capture`（快速收集窗）、`todo` / `note` 服务、GitHub 视图「转为 Todo」 | 不打开主面板也能记录；GitHub 条目一键带来源进入收件箱 |
-| 判断下一步 | `focus` 服务 + FocusView；Inbox triage（Todo 视图内嵌） | 只读聚合未完成 Todo（按到期状态分组：逾期 / 今天 / 近期 / 无日期）、置顶 / 最近便签、带可行动信号的 GitHub 条目；triage 逐条决策「今天做 / 稍后做 / 转列表 / 完成 / 删除」，全部复用现有 Todo 命令 |
-| 执行 | Todo 完成、悬浮便签、打开来源 | 最小动作就地完成或跳转 |
-| 回到来源 | `TodoSource`（type / repo / number / url） | Todo 携带来源，可一键返回 GitHub 原文，形成闭环 |
+| Todo / Inbox | [`models/todo.rs`](../src-tauri/src/models/todo.rs)、[`services/todo.rs`](../src-tauri/src/services/todo.rs)、[`commands/todo.rs`](../src-tauri/src/commands/todo.rs) | [`api/todo.ts`](../src/api/todo.ts)、[`stores/todo.ts`](../src/stores/todo.ts)、[`views/TodoView.vue`](../src/views/TodoView.vue)、[`triage.ts`](../src/triage.ts) |
+| 便签 | [`models/note.rs`](../src-tauri/src/models/note.rs)、[`services/note.rs`](../src-tauri/src/services/note.rs)、[`commands/note.rs`](../src-tauri/src/commands/note.rs) | [`api/note.ts`](../src/api/note.ts)、[`stores/note.ts`](../src/stores/note.ts)、[`views/NoteView.vue`](../src/views/NoteView.vue)、[`FloatingNote.vue`](../src/views/FloatingNote.vue) |
+| GitHub | [`services/github/`](../src-tauri/src/services/github/)、[`commands/github.rs`](../src-tauri/src/commands/github.rs)、[`models/github.rs`](../src-tauri/src/models/github.rs) | [`api/github.ts`](../src/api/github.ts)、[`stores/github.ts`](../src/stores/github.ts)、[`views/GithubView.vue`](../src/views/GithubView.vue) |
+| Focus | [`services/focus.rs`](../src-tauri/src/services/focus.rs)、[`commands/focus.rs`](../src-tauri/src/commands/focus.rs) | [`api/focus.ts`](../src/api/focus.ts)、[`stores/focus.ts`](../src/stores/focus.ts)、[`views/FocusView.vue`](../src/views/FocusView.vue) |
+| 到期提醒 / 托盘徽标 | [`services/reminder.rs`](../src-tauri/src/services/reminder.rs)（谁该提醒）、[`app/due_tracking.rs`](../src-tauri/src/app/due_tracking.rs)（循环与 Toast）、[`app/badge.rs`](../src-tauri/src/app/badge.rs) | [`views/MainBoard.vue`](../src/views/MainBoard.vue) 听 `focus-todo` |
+| 窗口 / 托盘 / 热键 | [`app/windows.rs`](../src-tauri/src/app/windows.rs)、[`tray.rs`](../src-tauri/src/app/tray.rs)、[`hotkeys.rs`](../src-tauri/src/app/hotkeys.rs)、[`tauri.conf.json`](../src-tauri/tauri.conf.json) | [`App.vue`](../src/App.vue) |
+| 备份 / 导入 | [`services/backup.rs`](../src-tauri/src/services/backup.rs)、[`commands/backup.rs`](../src-tauri/src/commands/backup.rs) | [`api/backup.ts`](../src/api/backup.ts)、[`views/SettingsView.vue`](../src/views/SettingsView.vue) |
+| 回收站 | [`commands/trash.rs`](../src-tauri/src/commands/trash.rs)（复用 todo / note 的软删除字段） | 设置页 |
+| 应用内更新 | [`commands/update.rs`](../src-tauri/src/commands/update.rs)、`tauri.conf.json` updater | [`api/update.ts`](../src/api/update.ts)、[`stores/update.ts`](../src/stores/update.ts) |
+| 配置 | [`models/config.rs`](../src-tauri/src/models/config.rs)（`CONFIG_SCHEMA_VERSION = 3`）、[`commands/settings.rs`](../src-tauri/src/commands/settings.rs) | [`stores/settings.ts`](../src/stores/settings.ts) |
 
-模块关系要点：
+Command 清单以 [`lib.rs`](../src-tauri/src/lib.rs) 的 `invoke_handler` 为准。
 
-| 关系 | 说明 |
-| --- | --- |
-| `commands` → `services` | 前端唯一入口：参数校验 / 错误转换后调用领域服务 |
-| `services` → `storage` | 领域服务持写锁，经 `storage` 原子写盘 |
-| `services` → `github` | gh CLI 封装与缓存，供 GitHub 服务与快照刷新使用 |
-| `focus` → todo / note / github | 只读投影，并行加载 + 局部失败隔离，不产生写路径 |
-| GitHub ↔ Todo（弱同步） | 经 `todo_create_from_github` 建立来源引用；刷新时仅查询已关联来源，关闭 / 合并可自动完成未完成 Todo，重新打开不自动重开 |
-| `events` → 所有窗口 | 数据变更广播，保证主面板与悬浮窗一致 |
+## 模块
 
-## 4. 模块边界
+### Rust
 
-### 4.1 Rust 系统层
-
-| 模块 | 职责 | 不负责 |
+| 位置 | 职责 | 不负责 |
 | --- | --- | --- |
-| `app` | 窗口创建与管理、托盘、热角、全局快捷键 | 业务数据读写 |
-| `commands` | 暴露给前端的 Tauri Commands，做参数校验与错误转换 | 业务规则 |
-| `storage` | 数据目录解析、JSON 序列化 / 反序列化、原子写盘 | GitHub 数据获取 |
-| `backup` | 数据包导出 / 导入校验 / 备份轮转 / 恢复（临时目录校验 + 原子替换） | UI 展示 |
-| `github` | gh 子进程调用、响应解析、缓存读写、定时刷新 | UI 展示 |
-| `reminder` | 到期提醒扫描（`remindAt` 到期判定）与逾期计数（托盘徽标数据源）；安静时段判定 | 任何写操作；实际弹通知由 `app` 调度线程执行 |
-| `focus` | 跨领域只读投影：并行加载、局部失败隔离、排序 / 去重 / 截断 | 任何写操作 |
-| `models` | serde 数据模型（config / note / todo / github） | 任何 IO |
-| `events` | 跨窗口事件广播（数据变更、窗口状态） | 业务逻辑 |
+| [`app/`](../src-tauri/src/app/) `windows` / `tray` / `hotkeys` / `badge` / `due_tracking` | 窗口生命周期、托盘、全局快捷键、热角、逾期徽标、提醒循环、GitHub 定时刷新 | 领域 JSON 的业务规则 |
+| [`commands/`](../src-tauri/src/commands/) | 前端唯一 IPC；校验后转 service | 业务规则、直接写盘 |
+| [`services/todo.rs`](../src-tauri/src/services/todo.rs) / [`note.rs`](../src-tauri/src/services/note.rs) | 列表与条目、Inbox `kind=inbox`、来源 Todo、周期实例 | UI |
+| [`services/github/`](../src-tauri/src/services/github/) | 见下一表 | UI；不存 GitHub token |
+| [`services/focus.rs`](../src-tauri/src/services/focus.rs) | 只读投影：并行加载 Todo / Note / GitHub，局部失败隔离 | 任何写路径 |
+| [`services/palette.rs`](../src-tauri/src/services/palette.rs) | 命令匹配 + 三域并发搜索（每域上限 8） | 新写路径；GitHub 只读本地缓存 |
+| [`services/backup.rs`](../src-tauri/src/services/backup.rs) | ZIP 导出 / 导入校验 / 备份轮转（最近 10 份） | UI |
+| [`services/reminder.rs`](../src-tauri/src/services/reminder.rs) | 纯函数：哪些 Todo 到期该提醒 | 不持 Storage；不弹 Toast |
+| [`storage/`](../src-tauri/src/storage/) | 目录解析、JSON 原子写、config 内存缓存、损坏隔离 | GitHub 网络 |
+| [`models/`](../src-tauri/src/models/) | serde 形状 | IO |
+| [`events/`](../src-tauri/src/events/) | `entity-changed` | 业务逻辑 |
+| [`demo.rs`](../src-tauri/src/demo.rs) | `--demo`：临时目录 + 固定脱敏数据，跳过真实 gh | 正式数据目录 |
 
-### 4.2 Vue 前端层
+GitHub 服务已拆开（[`services/github/mod.rs`](../src-tauri/src/services/github/mod.rs)）：
 
-| 模块 | 职责 |
+| 文件 | 做什么 |
 | --- | --- |
-| `views` | 主面板视图（Focus / Todo / 便签 / GitHub / 设置，Todo 内含 Inbox 处理模式 triage）、悬浮便签窗、快速收集窗与命令面板窗 |
-| `stores` | Pinia 状态管理，维护 UI 状态与缓存数据 |
-| `api` | `invoke` 封装层，前端唯一的数据访问入口 |
-| `components` | 可复用 UI 组件（卡片、列表、标签、窗口控制等） |
-| `types` | 与 Rust `models` 对应的 TypeScript 类型；`types/generated/` 由 ts-rs 在 `cargo test` 时生成（配置见根目录 `.cargo/config.toml`），其余文件为 re-export 或对生成类型的窄化（如 `AppConfig` 的字面量联合），改后端模型后需重新生成并提交 |
+| `gh_cli.rs` | 调 `gh` 子进程；解析 REST 响应形状 |
+| `watchlist.rs` | 追踪仓库、忽略 / 钉住、过滤器（持久化，不可重建） |
+| `refresh.rs` | 按仓库串行刷新快照：`gh api` REST（search / issues / pulls / checks） |
+| `sync.rs` | 已关联 Todo 的来源状态：每仓库一次 **`gh api graphql`**；关闭 / 合并可自动完成 |
+| `signals.rs` | `ActionSignal`（`needsAction` / `needsReview` / `ciFailed` / `stale` / `draft`） |
 
-前端不直接接触文件系统；所有文件读写与 gh 调用统一由 Rust 后端处理。
+`stale` 按 `config.githubStaleDays`（默认 14，0 关闭）在**读取快照时**重算，不依赖上次刷新时刻。
 
-## 5. 数据模型与存储
+### Vue
 
-### 5.1 存储布局
+| 位置 | 职责 |
+| --- | --- |
+| [`views/`](../src/views/) | 主面板 Tab（Focus / Todo / 便签 / GitHub / 设置）、`FloatingNote`、`QuickCapture`、`CommandPalette` |
+| [`stores/`](../src/stores/) | UI 状态与缓存；[`entitySync.ts`](../src/stores/entitySync.ts) 单次监听 `entity-changed` 并防抖刷新 |
+| [`api/`](../src/api/) | `call()` 封装 invoke，把 `AppError` 收成 `ApiError` |
+| [`components/`](../src/components/) | 可复用卡片、行、triage、确认条 |
+| [`triage.ts`](../src/triage.ts) | Inbox 逐条处理：动作映射与光标，状态只在内存，落盘走现有 todo command |
+| [`types/generated/`](../src/types/generated/) | ts-rs；其余 `types/*.ts` 为 re-export 或字面量窄化 |
 
-默认数据目录：`%USERPROFILE%\Documents\MayDolist`（后续设置 UI 可配置）。
+## 存储
+
+默认目录：`%USERPROFILE%\Documents\MayDolist`。启动时可用 `MAYDOLIST_DATA_DIR`；设置里迁移数据目录后由 bootstrap 记住。
 
 ```text
 MayDolist/
-├── config.json              # 数据目录、呼出角、快捷键、主题、刷新间隔、玻璃透明度、提醒安静时段
-├── backups/                 # 时间戳命名的本地备份 ZIP（保留最近 10 份）
-├── notes/<id>.json          # 便签：标题/内容/标签/颜色/置顶/窗口位置
-├── todos/<id>.json          # 待办：每个文件一个列表，条目含完成与软删除状态；可带到期日/提醒/周期规则；系统列表用 kind 标记
+├── config.json              # 单例；schemaVersion 当前为 3
+├── backups/                 # 时间戳 ZIP，保留最近 10 份
+├── logs/app.log             # 不进导出包
+├── notes/<id>.json
+├── todos/<id>.json          # 一个文件一个列表
 └── github/
-    ├── watchlist.json       # 追踪仓库：filters / signalFilters / collapsed / ignored / pinned
-    └── cache/<repo>.json    # PR / issue 快照缓存，含 fetchedAt / signalsComputedAt（可重建）
+    ├── watchlist.json       # 追踪与忽略 / 钉住（不可重建）
+    └── cache/<repo>.json    # PR / Issue 快照（可重建）
 ```
 
-### 5.2 实体规则
+- 实体一文件，文件名 = UUID。每份 JSON 有 `schemaVersion`；新字段一律可选 + serde 默认值，缺省不落盘。
+- Todo 列表用 `kind=inbox` 标记系统收件箱。条目可带 `source`（`github-issue` / `github-pr`）、`githubSync`、`dueDate` / `remindAt` / `repeat`。
+- 写入：进程内 Mutex 串行；临时文件 + 重命名。先写盘成功再广播。
+- JSON 损坏：隔离该文件，不拖垮整个数据目录。
+- 导出 / 备份是同一 ZIP 布局（`packageSchemaVersion = 1`）：`manifest.json` + config + notes + todos + github watchlist，可选 cache。不含 `logs/`、`backups/`、token。导入先在 staging 校验（版本、路径穿越、可解析），再备份当前数据后持锁交换；失败逐项回滚。
 
-- 实体一文件，文件名 = UUID，扩展名 `.json`。
-- 每个实体文件均含 `schemaVersion` 字段，用于未来格式迁移。
-- `todos/<id>.json` 为一个列表（多列表组织），条目含 `completed` 与 `deleted`（软删除）状态。
-- Todo 条目可携带可选来源引用 `source`（`type` / `repo` / `number` / `url`，MVP 支持 `github-issue` / `github-pr`）以及可选 `githubSync`（`state` / `lastSyncedAt` / 自动完成原因 / 同步错误）；旧数据无这些字段时按无来源或未同步读取，序列化时缺省字段不落盘，向后兼容。
-- Todo 条目可携带可选的 `dueDate`（ISO 日期或 RFC3339 日期时间）、`remindAt`（RFC3339，仅与 `dueDate` 同时有意义）、`repeat`（`daily` / `weekly` / `biweekly` / `monthly`）、`repeatUntil`（日期，停止重复生成）与 `lastRemindedAt`（已送达或安静时段抑制的提醒时间）；旧数据无字段时按空值读取、落盘跳过 `None`，JSON 形状保持向后兼容。非法日期 / 非法组合在 service 层拒绝写入；读取时降级为无日期，不崩溃。
-- `github/cache/<repo>.json` 为仓库快照，含 `fetchedAt` 时间戳，刷新失败或离线时回退展示。
-- 仓库快照的每个条目含可选信号字段（`assignees` / `reviewers` / `headSha` / `checksState` / `signals`），快照级 `signalsComputedAt` 记录信号计算时间；旧快照缺字段时按空值读取，刷新成功后自动补全（向后兼容，不需要迁移）。
-- 行动信号是稳定枚举（`needsAction` / `needsReview` / `ciFailed` / `stale` / `draft`），UI 只消费该枚举，不依赖 GitHub 原始字符串；`stale` 依据 `config.json` 的 `githubStaleDays`（默认 14 天，0 关闭）在读取快照时实时计算。
-- `config.json` 为单例配置，不采用实体文件形式。
-- 系统列表（如快速收集的「收件箱」）通过 `kind` 字段标记（`kind=inbox`）；旧数据无该字段时按普通列表读取，兼容不破坏。
-- Inbox 处理模式（triage）是**纯视图模式**：不改变领域数据格式、不新增持久化字段；队列 / 光标只存在于前端内存，全部动作经既有 command（`todo_update_item` / `todo_move_item` / `todo_soft_delete`）落盘。
+## 运行时
 
-### 5.3 写入策略
+### 窗口
 
-- 全部写入走**单进程原子写**：临时文件 + 重命名，避免写一半损坏。
-- Rust 单写者（Mutex 串行化写盘），多窗口并发安全。
-- 先写盘，成功后广播数据变更事件。
-
-### 5.4 配置与玻璃透明度
-
-`config.json` 使用 `schemaVersion` 管理结构演进。玻璃透明度相关配置键：
-
-- `mainWindowGlassOpacity`：主面板玻璃背景层 alpha，范围 `0.4..=1.0`。
-- `floatingNoteGlassOpacity`：悬浮便签玻璃背景层 alpha，范围 `0.4..=1.0`。
-- `quickCaptureHotkey` / `quickCaptureEnabled`：快速收集窗的全局快捷键与启用开关，默认 `Ctrl+Alt+Space` / `true`；与主面板快捷键冲突或格式非法时在保存设置时报错，不写入。
-- `triageLaterDays`：收件箱处理模式「稍后做」的到期日顺延天数，范围 `1..=30`，默认 3；越界值在保存时校验报错，反序列化时 `sanitize` 自动收敛。
-- `commandPaletteHotkey` / `commandPaletteEnabled`：全局命令面板的快捷键与启用开关，默认 `Ctrl+K` / `true`；与主面板或快速收集快捷键冲突或格式非法时在保存设置时报错，不写入。
-- `quietHours`（可选）：提醒安静时段，`start` / `end` 均为本地 `HH:MM`（24 小时制），支持跨午夜（如 `22:00`–`07:00`）；该时段内到期提醒不弹通知，仅保留托盘逾期徽标。旧配置无该字段时按 `null`（不启用）读取；非法值在加载时被清理回 `null`。
-- `githubSyncEnabled` / `githubAutoCompleteTodos`：已关联 GitHub 来源同步与关闭 / 合并后自动完成开关，默认均为 `true`；关闭自动完成时仍记录来源状态，但不改变 Todo 完成状态。
-
-相关规则：
-
-- **支持环境基线**：当前 Windows 11 + WebView2 是唯一受支持环境。玻璃效果只针对该环境渲染，不维护 Windows 10、旧版 WebView2 或缺失 Acrylic 能力环境的降级路径。
-- **兼容 schema 升级**：新增配置字段提供 serde 默认值。加载旧 `config.json` 时保留原主题、快捷键、热角和数据目录，补齐新字段、升级 `schemaVersion` 并回写；只有 JSON 损坏或结构不可恢复时才隔离备份。
-- **范围校验与容错**：`settings_update` 拒绝写入越界透明度；加载时对越界值做 clamp（`0.4..=1.0`）并回写，容忍手工编辑导致的错误值。
-- **多窗口应用**：主面板与每个悬浮便签窗读取对应透明度配置，通过 `settings-changed` 事件广播同步。
-
-### 5.5 数据包（导出 / 备份）格式
-
-导出与「创建备份」产物为同一 ZIP 包格式，包内布局如下：
-
-```text
-maydolist-export-YYYYMMDD-HHMMSS.zip
-├── manifest.json            # packageSchemaVersion / appVersion / createdAt / tool / summary
-├── config.json              # 完整配置（导入时 dataDir 会被改写为当前数据目录）
-├── notes/<id>.json          # 便签（原样文件）
-├── todos/<id>.json          # 待办列表（原样文件）
-└── github/
-    ├── watchlist.json       # 追踪列表（filters / signalFilters / ignored / pinned）
-    └── cache/<repo>.json    # 可重建快照缓存（导出可选，恢复不依赖）
-```
-
-- 包格式用独立 `packageSchemaVersion`（当前 `1`）管理，不直接复用单文件 `schemaVersion`；未来格式变化通过版本号 + 迁移函数演进。
-- 导出包包含 config、Todo、Note、GitHub watchlist 与（可选）GitHub cache；**不包含** `logs/`、`backups/`、gh token、认证文件或任何环境变量。
-- 导入前在临时 / 同卷 staging 目录完成校验：manifest 版本兼容、路径安全（拒绝绝对路径、`..` 穿越、反斜杠变体、驱动器符）、重复条目、核心 JSON 可解析；校验失败不修改当前数据。
-- 可重建的 `github/cache` 为降级数据：单文件损坏时跳过并计数提示，不影响核心恢复；缺失 cache 恢复后仍可通过 gh CLI 刷新。
-- 「创建备份」写入 `<数据目录>/backups/maydolist-backup-<时间戳>.zip` 并轮转保留最近 10 份；导入前自动创建当前数据的完整备份，导入失败时原数据仍可通过该备份恢复。
-
-## 6. 关键流程
-
-### 6.1 启动与登录检测
-
-1. 启动 Rust 主进程，加载 `config.json`，创建缺失目录。
-2. 创建主面板窗口（隐藏）、托盘图标，注册热角与全局快捷键。
-3. 前端加载后调用登录检测：`gh auth status` 判断登录状态。
-4. 未登录时提示引导 `gh auth login`；已登录则按配置触发 GitHub 数据刷新。
-
-### 6.2 呼出 / 隐藏
-
-- 默认热角：右上角；默认全局快捷键：`Ctrl+Alt+M`。
-- 托盘图标常驻，点击切换主面板显示 / 隐藏。
-- 主面板隐藏时不退出进程，保持托盘与后台刷新能力。
-- 快速收集：默认 `Ctrl+Alt+Space`（或托盘「快速收集」）呼出轻量窗口；再次按快捷键、Esc、右上角关闭按钮或 Alt+F4 可隐藏；输入默认创建 Todo 到「收件箱」，单独输入 `/note` 创建并打开空白悬浮便签；Enter 成功后隐藏并清空，手动隐藏保留草稿，失败时保留输入并显示错误。
-- 「收件箱」为系统列表：优先按 `kind=inbox` 稳定标记查找，其次采用同名（「收件箱」）旧列表并补记标记，均不存在时才创建，保证幂等不重复。
-
-### 6.3 Todo
-
-- 创建待办、勾选完成（划线展示）、软删除，支持多列表组织。
-- 软删除数据保留在文件内，便于未来恢复；列表展示时过滤已删除项。
-- 条目可带来源引用（如 GitHub PR / Issue）：Todo 视图与 Focus 视图显示来源徽标（仓库 #编号），并提供「打开来源」操作；来源 URL 仅允许 http / https，由 Rust 层校验，打开统一走系统浏览器。
-- GitHub 来源同步：手动刷新、应用启动刷新和后台定时刷新后，只检查已转为 Todo 的来源；Issue / PR 关闭或 PR 合并时，默认自动完成仍未完成的关联 Todo，并保存 `githubSync` 状态与原因；重新打开只显示提示，不自动重开本地 Todo；网络、认证、404 或限流失败时保留原完成状态，不猜测为关闭。
-- 来源字段必须通过 Rust command / service 传递并持久化，前端不直接写文件。
-- 条目可设置 / 清除到期日（`dueDate`）、提醒时间（`remindAt`）与周期规则（`repeat` / `repeatUntil`）。Todo 视图行内提供日期、日期时间与重复规则控件；所有写入经 `todo_update_item` 复用同一 command / service，前端不直接写文件。
-- 完成带 `repeat` 的任务时，service 在同一原子写中生成下一次实例（标题、来源、周期规则一致，`dueDate` 推进到下一个未来发生日），`repeatUntil` 到期后不再生成；重复生成逻辑集中在 Rust service 层并有单测，用户可以随时把周期规则改为「不重复」。
-
-### 6.4 便签
-
-- 主面板内快速记录，可拖出为独立桌面悬浮小窗（置顶、可收起）。
-- 每个悬浮便签窗对应一个 Rust 窗口与一个 WebView2 渲染进程；关闭悬浮窗只隐藏不销毁数据。
-
-### 6.5 GitHub 追踪
-
-- 按项目（仓库）分组，可增删追踪仓库；仓库面板支持折叠 / 展开，并持久化折叠状态与条目摘要（如 `3 PR · 2 Issue`）。
-- 默认只展示过滤器命中的 open Issue / PR（「我的 / 被提及 / 被分配 / 参与」）；可选开启「全部 PR」以拉取仓库全部未合并 PR。
-- 行动信号：每条 open 条目计算稳定信号并显示徽标——「需要我处理」（被分配 / 被提及 / 参与 / 手动关注）、「需要 Review」（当前用户被请求 review 的 PR）、「CI 失败」（失败 / 错误检查）、「长期未更新」（超过 `githubStaleDays` 天）、「Draft」（草稿 PR，仅展示不计入行动）。每条目同时显示最后更新时间和本地快照 / 信号计算时间。
-- 行动信号过滤：每个仓库可选按信号过滤（多选，空 = 不过滤，保持旧行为）；「Draft」不提供过滤选项，避免把信息性状态变成行动列表。
-- 支持忽略条目：忽略名单写在 `github/watchlist.json`（非可重建 cache），刷新后仍保持隐藏；可用 `#xx` 手动加回。
-- 支持按仓库手动钉住：在展开的仓库内输入 `#123`，经 `gh api repos/{repo}/issues/{n}` 拉取后写入 `pinned`，与自动结果合并展示（标记「手动」）。
-- 数据经 `gh api`（`--paginate`）读取 REST 接口获取；open PR 补充 `pulls/{n}` 详情（requested reviewers / head SHA）与 `commits/{sha}/status` / `check-runs` 检查状态。同一 PR 的 `updated_at` 未变化时复用缓存详情，避免每次刷新重复打 API（rate-limit 友好）。
-- 手动刷新（全部或单仓库）+ 定时刷新（默认 30 分钟，可配置）。全部刷新按仓库**串行**执行（单进程内逐个 gh 调用），并用 `refreshing` 集合防止同一仓库并发重复刷新；单仓库失败只在该仓库快照上记录 `lastError` 并保留旧缓存，不清空其他仓库数据。
-- 刷新失败、认证失败、网络失败或 API 缺字段时降级：保留上次本地快照继续展示（缺信号字段的旧快照标注「旧缓存」，刷新后自动补全）。
-- 点击条目在系统浏览器打开对应页面。
-- PR / Issue 行提供「转为 Todo」：调用 Todo 领域命令（`todo_create_from_github`），默认标题为「仓库 #编号 标题」，条目默认进入收件箱（复用 `ensure_inbox` 幂等逻辑），写入带来源的 Todo；同一 `repo` + `number` 的未完成条目会复用已有 Todo，不再重复创建。该操作只触碰 Todo 域，不改变 GitHub 缓存、认证与网络状态。
-- 刷新结果返回关联来源同步摘要（检查数、自动完成数、重新打开数、失败数）；设置页可关闭同步、关闭自动完成或立即同步关联来源。
-
-### 6.6 Focus 今日视图
-
-- Focus 是主面板默认打开页，只做**只读投影**，不改变 Todo / 便签 / GitHub 任何文件格式，也不写回领域存储。
-- 并行加载三个领域（`FocusService::overview` 内线程并行），任一领域失败只产生该区块的局部错误，不阻塞其余区块。
-- 纳入规则：
-  - 待办：未完成且未软删除；按到期状态分组展示——**已逾期**（`dueDate < 今天`，最早到期在前，红色高亮并置于区块顶部）→ **今天到期**（按到期时间升序）→ **近期 7 天**（`今天 < dueDate <= 今天+7`，按到期日期升序）→ **无日期**（收件箱优先、按原 sort order）；每个分组标题显示数量，跨组合计上限 50；非法日期降级进「无日期」组。分组逻辑在 `FocusService`（Rust）完成并输出分组元信息，前端只负责渲染。
-  - 便签：置顶全部（按更新时间倒序）+ 最近更新的未置顶便签（默认 5 条），按 id 去重，上限 8。
-  - GitHub：只读本地快照中 `state=open` 且携带**可行动信号**（需要我处理 / 需要 Review / CI 失败 / 长期未更新）的 Issue / PR（不发网络请求；仅 Draft 或无关的 open 条目不进入 Focus），手动钉住优先、按更新时间倒序，上限 30；未登录 / 离线 / 上次刷新失败时标记 `offlineCache` 并展示缓存。
-- 每个聚合项提供最小动作：完成 Todo、打开来源（GitHub 走系统浏览器）、进入对应模块（便签可携带目标 id 直接打开编辑，保留悬浮操作）。
-- Focus 前端 store 监听 `entity-changed`（todo* / note / github）后防抖刷新，多窗口修改后与其他 Tab 保持一致。
-### 6.7 到期提醒、托盘徽标与周期任务
-
-- **提醒调度**：Rust 后台线程每 15 秒扫描全部未完成 Todo（Todo 列表带内存缓存，写时失效），命中 `remindAt <= now` 且 `dueDate` 存在、且 `lastRemindedAt` 尚未等于该 `remindAt` 的条目时发送 Windows 系统通知。送达或安静时段抑制后都会写入 `lastRemindedAt`，进程重启不会连弹。通知带「查看待办」按钮，点击打开主面板并聚焦对应条目（`focus-todo` 事件 → Focus 视图滚动 + 闪烁高亮）。
-- **静默降级**：通知被系统拦截、权限缺失或开发模式无 AUMID 时只记日志，不阻断主流程；托盘徽标始终保留为被动信号。安静时段内同样只保留徽标，不弹通知。
-- **托盘徽标**：逾期计数（`dueDate < 今天` 的未完成项）以红色数字徽标显示在托盘图标上，并同步更新 tooltip；数量为 0 时恢复默认图标并隐藏徽标。徽标由 Rust 端 16×16 RGBA 光栅化生成（内嵌 3×5 点阵数字），不依赖字体或网络。
-- **通知实现**：使用 `tauri-winrt-notification`（Windows Toast），toast 线程保持 COM 公寓存活直到被点击 / 关闭；开发模式下无注册 AUMID 时静默失败降级。
-- **重复生成**：完成带 `repeat` 的任务时，service 按规则与当前时间计算下一次 `dueDate`（daily / weekly / biweekly 按锚点日期步进，monthly 保留锚点日并做月末钳制，如 1-31 → 2-28 → 3-31），`repeatUntil` 到期后停止；新实例与已完成条目在同一原子写内落盘，避免重复生成。
-- **快速捕捉日期**：快速收集输入支持最小自然语言前缀：`明天` / `今天` / `后天`、`周X` / `星期X` / `下周X`（一～日 / 天）、`N天后`（1..=365）、`月底` / `月末`；解析结果写入 `dueDate`，解析失败或没有日期前缀时按普通 Todo 创建，不阻断捕获。
-
-### 6.8 全局命令面板（Ctrl+K）
-
-- **入口与窗口**：全局快捷键默认 `Ctrl+K`（设置中可修改或关闭），复用轻量无边框窗口框架，打开独立的 `command-palette` 窗口（声明为隐藏、置顶、跳过任务栏、Acrylic 毛玻璃），每次呼出时居中于**光标所在屏**（光标不在任何已知屏幕时回退主屏），与快速收集窗口并存、互不影响。
-- **命令**：空输入显示命令列表——切换 Tab（Focus / Todo / 便签 / GitHub / 设置）、新建 Todo、新建便签、立即备份、打开数据目录；命令匹配（标签 / 关键词 / id）在 Rust 层完成并有单测，前缀命中优先于子串命中。
-- **搜索**：输入即搜索（防抖 150ms），`PaletteService` 并发检索 Todo（未完成、含收件箱）、便签标题与全文、GitHub 本地缓存条目，结果按域分组并限制条数（每域上限 8）；任一域加载失败只让该域显示为空，不阻塞命令列表与其他域。
-- **动作**：搜索结果提供最小操作——完成 Todo、打开来源（GitHub 走系统浏览器）、跳转模块、置顶便签；全部复用现有 Tauri command 与 stores（`todo_update_item` / `note_update` / `open_external` 等），不新增写路径；前端不直接写文件。
-- **新建记录**：选中「新建 Todo」/「新建便签」后，面板切换为标题输入模式，Enter 分别复用 `quick_capture_submit`（进入收件箱）与 `note_create`（创建后打开便签模块），Esc 返回命令列表。
-- **交互**：`↑` / `↓` 选择，`Enter` 执行（`event.isComposing` 时忽略，输入法组合输入不触发执行），`Esc` 关闭，空结果显示引导文案；长标题以省略号截断，不破坏布局。
-- **GitHub 离线**：只读本地快照缓存（watchlist 仓库），不触发任何网络请求；未登录或上次刷新失败时结果区标注「离线缓存」。
-
-### 6.9 Inbox 逐条处理模式（triage）
-
-- **入口与退出**：Todo 视图在存在收件箱时显示「处理模式」按钮；进入后一次只显示一条未处理条目，其余隐藏，顶部显示剩余条数（如「剩余 12 条」）与进度条；随时按 `Esc` 或「退出」按钮回到普通列表。triage 是纯视图模式，状态不落盘，与普通列表互不干扰。
-- **动作（快捷键 `1`-`5`，全部复用现有 command / service，不新增写路径）**：
-  - `1` 今天做：`todo_update_item` 写入 `dueDate=今天`（保留原有提醒 / 周期字段）；
-  - `2` 稍后做：`todo_update_item` 写入 `dueDate=今天+N 天`（N 为配置 `triageLaterDays`，默认 3，范围 1-30）；
-  - `3` 转列表：弹出目标列表选择器（列表选择 + 确认），复用 `todo_move_item` 追加到目标列表末尾，条目保留 `TodoSource`，来源徽标与「打开来源」不变；
-  - `4` 完成：`todo_update_item completed=true`；带周期规则的条目按既有 service 逻辑在同一原子写内生成下一次实例；
-  - `5` 删除：`todo_soft_delete` 软删除，可在回收站恢复。
-- **光标与计数**：进入时以稳定 `id` 建立有序队列，光标也是 `id` 而非序号；删除 / 移动后取队列中下一个仍未处理的条目，绝不跳过；处理过程中列表被其他窗口修改时（`entity-changed` 触发刷新），按 `id` 校正光标与剩余计数，不重复处理、不把外部新增条目拉入当前队列。
-- **完成态与错误**：空收件箱进入或最后一条处理完后显示「收件箱已清空」完成态（若其他窗口 / 周期任务新增了条目则附提示，退出后可在普通列表继续处理）；写盘失败时停留在当前条目并显示错误，不静默丢失。
-- **键盘安全**：`event.isComposing` 或 keyCode 229 时忽略按键，输入法组合输入不会误触动作；转列表选择器打开期间 `1`-`5` 不生效，`Esc` 先关闭选择器再退出。
-- **单元测试**：动作映射、稳定 id 光标推进 / 校正、剩余计数与完成态判定、日期计算（今天 / 顺延 N 天，跨月跨年）均为纯函数并有单测（`src/triage.ts` + `src/triage.test.ts`）。
-
-### 6.10 备份 / 导入 / 恢复
-
-- **导出数据**：设置页「导出数据」经 Windows 原生保存对话框选择目标路径，写入 `maydolist-export-<时间戳>.zip`（不含任何登录凭据）；「包含 GitHub 缓存」开关控制是否附带可重建的 `github/cache`。
-- **创建备份**：设置页「创建备份」在 `<数据目录>/backups/` 下生成时间戳命名的 ZIP（内容同导出，固定包含缓存），并轮转只保留最近 10 份；「最近备份」列表展示时间、大小与位置。
-- **导入数据**：先选包 → 后端校验并返回内容概览（包格式版本、导出应用版本、便签 / 待办 / 缓存计数）→ 前端弹覆盖确认 → 确认后先自动备份当前数据，再执行导入；失败时原数据与配置保持可用。
-- **导入原子性**：校验在 staging 目录完成；通过后进入「备份当前数据 → 持有写锁交换 config.json / notes/ / todos/ / github/ → 成功清理 aside 副本」的流程，交换中途失败会逐项回滚，不产生半套数据；`logs/` 与 `backups/` 不受交换影响。
-- **导入后**：广播 `settings-changed` 与 `entity-changed`（todo / note / github），各窗口立即刷新；导入包的 `config.json` 中 `dataDir` 被改写为当前数据目录，schema 在加载时经既有迁移补齐。
-- **版本兼容**：只接受 `packageSchemaVersion <= 当前版本`；更高的未知版本明确拒绝并提示，不静默丢弃字段；包内旧 schema 的实体复用现有 serde 默认值迁移。
-- **打开数据目录**：设置页按钮调用系统资源管理器打开当前数据目录，便于手动查看 / 复制备份。
-- **日志**：导出、导入、创建备份与打开目录均记录关键操作日志（路径与计数），日志不写入文件内容、gh token 或认证信息。
-
-### 6.11 行动闭环（捕获 → 判断下一步 → 执行 → 回到来源）
-
-- **捕获**：默认 `Ctrl+Alt+Space` 或托盘「快速收集」呼出快速收集窗，普通文本和可选的 `todo:` 前缀进入收件箱，输入 `/note`（可选带标题，如 `/note 想法`）创建并打开悬浮便签；主面板内可直接创建 Todo / 便签；GitHub 视图的 PR / Issue 行可一键「转为 Todo」（默认进收件箱并携带来源）。
-- **判断下一步**：主面板默认打开「今日」（Focus），只读聚合未完成 Todo（收件箱优先）、置顶 / 最近更新便签与携带可行动信号的 GitHub 条目，按行动优先级展示。
-- **执行**：在 Focus 或对应模块内勾选完成 Todo、将便签拖出为悬浮小窗、进入对应模块继续处理；GitHub 条目点击在系统浏览器打开原文。
-- **回到来源**：带来源的 Todo 显示「仓库 #编号」徽标并提供「打开来源」，一键返回 GitHub 页面；处理产生的新上下文（新 PR / issue、新待办）重新进入捕获阶段，形成闭环。
-- **信任层**：本地备份、导出、导入与恢复能力贯穿闭环，保证本地数据在异常情况下可恢复，不依赖任何云端服务。
-
-## 7. 并发与一致性
-
-- **单写者**：所有文件写入由 Rust 单进程串行化（Mutex），避免多窗口并发写冲突。
-- **先写盘后广播**：写盘成功后才广播数据变更事件，前端收到的状态与磁盘一致。
-- **缓存与实体分离**：GitHub 缓存（`github/cache/`）与用户实体数据（`notes/`、`todos/`）分离，缓存可安全重建。
-- **刷新去重与串行化**：`GithubService` 内 `refreshing` 集合保证同一仓库同一时刻只有一个刷新任务；`refresh_all` 按仓库串行执行，避免进程数量膨胀与 API rate limit 叠加。
-- **多窗口同步**：通过 Tauri 事件广播数据变更，所有窗口（主面板与悬浮便签）保持同一数据视图。
-
-## 8. 安全与权限
-
-- **Tauri capabilities 最小化授权**：只授予前端必需能力，前端无文件系统访问权限。
-- **GitHub 凭据**：仅由 gh CLI 持有，应用不读取、不存储 token。
-- **导出包安全**：数据包只含用户数据与可重建缓存，不含 token / 认证文件 / 环境变量；导入包按白名单布局 + 路径安全校验 + 版本校验，恶意包无法写穿数据目录。
-- **GitHub 权限面**：应用只调用 gh CLI 的只读接口（`user`、`search/issues`、`repos/{repo}/issues`、`pulls`、`commits/{sha}/status`、`check-runs`），不创建 / 合并 / 评论；所需 scope 由 gh CLI 登录时授予（经典 token 需 `repo` 或公开仓库只读权限），应用不向 GitHub 发起写操作。
-- **外链一律系统浏览器打开**：不内嵌浏览器，降低凭据与 XSS 暴露面。
-- **默认 CSP**：为前端页面设置合理 CSP，禁止不安全的内联执行与外部资源加载。
-
-## 9. 错误处理与恢复
-
-| 场景 | 处理方式 |
-| --- | --- |
-| gh 认证失效 / 未登录 | 提示引导 `gh auth login`，保留本地缓存可看 |
-| 网络失败 / 离线 | 展示上次缓存快照并提示「刷新失败」 |
-| JSON 文件损坏 | 隔离损坏文件（备份后重建），避免整个数据目录不可用 |
-| 写盘失败（磁盘满 / 权限） | 保留原文件不覆盖，向 UI 返回错误并记录日志 |
-| 导入包损坏 / 版本过高 / 含非法路径 | 校验阶段拒绝并明确报错，不修改当前数据；导入前自动备份仍可用 |
-| 导入交换失败 | 逐项回滚原文件；日志记录失败原因，原数据可用 |
-| 本地日志 | 记录关键错误（写入、gh 调用、窗口创建），便于排查 |
-
-## 10. 验收标准
-
-### 10.1 正常路径
-
-- 首次启动自动创建数据目录与默认 `config.json`。
-- Todo / 便签 / 速记 / 追踪仓库的增删改查全部走 Rust 原子写，重启后数据完整。
-- 热角、全局快捷键、托盘均可呼出 / 隐藏主面板。
-- 便签可拖出为独立悬浮小窗（置顶、可收起），数据与主面板一致。
-- GitHub 手动刷新与定时刷新成功，条目按仓库分组展示，点击在系统浏览器打开。
-- 设置到期日的 Todo 在 Focus 视图进入正确分组（已逾期置顶高亮、分组标题显示数量）；到点弹出提醒通知，点击通知打开主面板并聚焦条目。
-- 完成带周期规则的 Todo 自动生成下一次实例（`repeatUntil` 到期后停止）；快速收集输入 `明天 提交周报` 等前缀自动带到期日。
-- `Ctrl+K` 打开命令面板：输入关键词能在 Todo / 便签 / GitHub 结果中命中并跳转；输入命令名可切换 Tab 或新建记录；对搜索结果执行「完成 Todo」「打开来源」「置顶便签」等动作后状态正确刷新。
-- 收件箱处理模式：进入后一次只见一条，剩余计数正确递减、进度条推进；`1`-`5` 分别执行「今天做 / 稍后做 / 转列表 / 完成 / 删除」，转列表后条目出现在目标列表且 GitHub 来源保留；最后一条处理后显示「收件箱已清空」，退出后列表状态正确。
-
-### 10.2 异常路径
-
-- 断网或 `gh api` 失败：展示缓存并提示「刷新失败」，不崩溃、不丢数据。
-- `gh auth status` 未登录 / token 失效：提示引导登录，缓存仍可查看。
-- 单个 JSON 损坏：隔离并重建该文件，其余数据不受影响。
-- 通知权限缺失 / 系统拦截 / 安静时段：不弹通知，托盘逾期徽标保持可用，主流程不受影响。
-- 非法日期 / 非法周期规则在写入时被拒绝，旧数据或损坏字段读取时降级为无日期，不崩溃。
-- 命令面板：输入法组合输入不触发执行；快捷键冲突或配置非法时保存设置明确报错，不影响主面板；GitHub 离线时仅显示本地缓存并标注「离线缓存」；结果数量受限，长标题截断不破坏布局。
-- 收件箱处理模式：输入法组合输入不触发快捷键；写盘失败时停留在当前条目并显示错误；其他窗口修改列表后光标与剩余计数基于稳定 `id` 自动校正，不重复处理、不跳过条目。
-
-### 10.3 恢复路径
-
-- 修复登录 / 网络后，手动刷新成功恢复实时数据。
-- 损坏文件修复后重启应用，数据目录整体可读。
-- 多窗口并发操作后，所有窗口数据一致，无丢失。
-
-## 11. 落地清单与风险
-
-### 11.1 落地清单（对照 roadmap）
-
-| 阶段 | 范围 | 对应模块 |
+| label | 创建 | 前端入口 |
 | --- | --- | --- |
-| v0.1 | Todo 待办 + 收纳式呼出（热角 / 快捷键 / 托盘） | `app`、`storage`、`models`、前端 Todo 视图 |
-| v0.2 | GitHub 项目追踪（增删仓库、PR / issue 展示、缓存刷新） | `github`、`storage`、前端 GitHub 视图 |
-| v0.3 | 独立悬浮便签窗 + 标签速记 | `app`（多窗口）、`storage`、前端便签 / 速记视图 |
-| v1.0 | 设置 UI、开机自启、NSIS 安装包 | `app`、`config`、打包配置 |
+| `main` | `tauri.conf.json`，启动可隐藏 | `App.vue` 默认 → `MainBoard.vue` |
+| `quick-capture` | 配置里预创建，默认隐藏 | `index.html?quick` |
+| `command-palette` | 同上；呼出时居中到光标所在屏 | `index.html?palette` |
+| `note-<uuid>` | 运行时按便签创建 | `index.html?note=<id>` |
 
-### 11.2 风险与回滚
+能力集：[`capabilities/default.json`](../src-tauri/capabilities/default.json)（`main`、`note-*`、`quick-capture`、`command-palette`）。前端无文件系统权限。
 
-| 风险 | 影响 | 缓解 |
+### 事件
+
+| 事件 | 何时 | 谁听 |
 | --- | --- | --- |
-| 目标机器无 WebView2 | 应用无法启动 | 安装包检测并提示安装 WebView2 Runtime |
-| gh CLI 版本差异 | `gh api` 输出字段不一致 | 解析时容错缺失字段，版本检测提示升级 |
-| 数据格式未来迁移 | 旧数据无法读取 | 实体文件含 `schemaVersion`，升级时迁移 |
-| 多窗口状态漂移 | 主面板与悬浮窗数据不一致 | 统一事件广播 + 单写者，验收含并发一致性 |
+| `entity-changed` | 领域写盘成功后 | 各 Pinia store（经 `EntitySyncer`） |
+| `settings-changed` | 改配置或导入后 | `stores/settings.ts` |
+| `focus-todo` | 点击到期 Toast | `MainBoard.vue` → 打开今日并高亮 |
+| `tray-action` | 托盘菜单 | `MainBoard.vue`（新建便签 / 刷新 GitHub / 设置） |
 
-## 12. 相关文档
+### 后台循环
 
-- [README](../README.md)：产品概览、开发环境与构建。
-- ADR-001（README 内）：UI 技术栈选型（已定稿：Tauri 2 + Vue 3 + TS + Rust 后端 + gh CLI）。
+[`app/due_tracking.rs`](../src-tauri/src/app/due_tracking.rs) 在 Rust 进程里跑，不经过前端：
+
+- **提醒**：约 15s 扫描未完成 Todo；`remindAt <= now` 且尚未对应该时刻写过 `lastRemindedAt` 则发 Windows Toast（安静时段只记抑制、仍更新 `lastRemindedAt`）。通知失败只记日志。
+- **托盘徽标**：逾期未完成条数；0 则去掉徽标。
+- **GitHub**：按 `githubRefreshIntervalMinutes`（0 关闭）串行 `refresh_all`；若开启同步则接着 GraphQL `sync_linked_todos`。同一仓库同时只允许一次刷新。
+
+Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不读正式目录、不打真实 GitHub。
+
+## 设计不变量
+
+**非目标（明确不做）**
+
+- 云同步、多端、移动端 / Web 端。
+- 应用内 GitHub 登录或读取 / 存储 token（凭据只在 `gh`）。
+- 把本地 JSON 整体换成数据库。
+- GitHub 写操作（创建 PR、合并、评论）；外链一律系统浏览器。
+- 完整项目管理（里程碑、团队协作）。
+
+**安全**
+
+- capabilities 最小化；CSP 在 `tauri.conf.json`。
+- 导入包白名单布局 + 拒绝 `..` / 绝对路径。
+- 便携版 EXE 文件名含 `portable` 时 updater 不替换正在运行的文件。
+
+**向后兼容**
+
+- 新字段可选；加载旧 `config.json` 时 `sanitize` 补齐并升到 schema 3 后回写。
+- 读取非法日期降级为无日期，不崩溃；非法组合在 service 层拒绝写入。
+- Focus、命令面板、triage **不**为自身新增持久化格式。
+
+**一致性**
+
+- 单写者；先盘后事件。
+- `github/cache` 可丢，watchlist 与用户实体不可丢。
+- Focus / Palette 只读本地快照，刷新失败保留旧缓存并记 `lastError`。
+
+## 相关文档
+
+- [README](../README.md)：产品、开发运行、质量检查。
+- [building.md](building.md)：CI、NSIS、Release 签名与 updater。
+- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.1`）。
+- [issue-tracker.md](issue-tracker.md)：已完成的 issue 编排日志（归档，不是活任务板）。
