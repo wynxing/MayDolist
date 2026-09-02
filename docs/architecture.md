@@ -216,11 +216,9 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 - 导入包白名单布局 + 拒绝 `..` / 绝对路径。
 - 便携版 EXE 文件名含 `portable` 时 updater 不替换正在运行的文件。
 
-**向后兼容**
+**演进（新代码）**
 
-- 新字段可选；加载旧 `config.json` 时 `sanitize` 补齐并升到 schema 3 后回写。
-- 读取非法日期降级为无日期，不崩溃；非法组合在 service 层拒绝写入。
-- Focus、命令面板、triage **不**为自身新增持久化格式。
+工程准则见 [AGENTS.md](../AGENTS.md)。Focus、命令面板、triage **不**为自身新增持久化格式。非法组合在 service 层拒绝写入。
 
 **一致性**
 
@@ -231,5 +229,6 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 ## 相关文档
 
 - [README](../README.md)：产品、开发运行、质量检查。
+- [AGENTS.md](../AGENTS.md)：给编码代理的开发硬约束。
 - [building.md](building.md)：CI、NSIS、Release 签名与 updater。
 - [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.1`）。

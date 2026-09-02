@@ -142,7 +142,7 @@ flowchart LR
 
 ## 项目结构
 
-与 [docs/architecture.md](docs/architecture.md) 同一棵树。改行为时从那篇的「代码地图」对到文件。
+与 [docs/architecture.md](docs/architecture.md) 同一棵树。改行为时从那篇的「代码地图」对到文件。编码代理遵循 [AGENTS.md](AGENTS.md)。
 
 ```text
 src/                              Vue 3 + TS
