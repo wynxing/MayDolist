@@ -1,6 +1,6 @@
 # MayDolist 架构
 
-> 现行系统地图 · 对照代码 `1.3.1` · 2026-09-01
+> 现行系统地图 · 对照代码 `1.3.2` · 2026-09-03
 >
 > 产品体验见 [README](../README.md)。字段以 `src-tauri/src/models/` 为准，改模型后跑 `pnpm gen:types` 并提交 `src/types/generated/`。
 
@@ -231,4 +231,4 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 - [README](../README.md)：产品、开发运行、质量检查。
 - [AGENTS.md](../AGENTS.md)：给编码代理的开发硬约束。
 - [building.md](building.md)：CI、NSIS、Release 签名与 updater。
-- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.1`）。
+- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.2`）。

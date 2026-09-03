@@ -116,6 +116,12 @@ function deleteItem(item: TodoItem) {
   pendingConfirm.value = { kind: "item", id: item.id, title: item.title };
 }
 
+function pendingForList(list: TodoList) {
+  if (!pendingConfirm.value) return false;
+  if (pendingConfirm.value.kind === "list") return pendingConfirm.value.id === list.id;
+  return list.items.some((item) => item.id === pendingConfirm.value!.id);
+}
+
 async function confirmPending() {
   const pending = pendingConfirm.value;
   if (!pending) return;
@@ -313,19 +319,6 @@ function onItemDragEnd() {
       </template>
     </PageHeader>
 
-    <ConfirmBar
-      v-if="pendingConfirm"
-      :message="
-        pendingConfirm.kind === 'list'
-          ? `将清单“${pendingConfirm.title}”移入回收站？`
-          : `将待办“${pendingConfirm.title}”移入回收站？`
-      "
-      confirm-label="移入回收站"
-      danger
-      @confirm="confirmPending"
-      @cancel="pendingConfirm = null"
-    />
-
     <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
     <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
 
@@ -373,7 +366,22 @@ function onItemDragEnd() {
           @item-dragover="onItemDragOver"
           @item-drop="(event, itemId) => onItemDrop(event, list.id, itemId)"
           @item-dragend="onItemDragEnd"
-        />
+        >
+          <template #confirm>
+            <ConfirmBar
+              v-if="pendingConfirm && pendingForList(list)"
+              :message="
+                pendingConfirm.kind === 'list'
+                  ? `将清单“${pendingConfirm.title}”移入回收站？`
+                  : `将待办“${pendingConfirm.title}”移入回收站？`
+              "
+              confirm-label="移入回收站"
+              danger
+              @confirm="confirmPending"
+              @cancel="pendingConfirm = null"
+            />
+          </template>
+        </TodoListCard>
       </div>
 
       <EmptyState v-else title="还没有清单" text="先新建一个，把第一件事记下来。" />

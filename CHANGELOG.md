@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+
+- Show delete, import, and empty-trash confirm bars next to the action instead of at the top of the page.
+
 ## 1.3.1
 
 - Make inbox triage "later" days configurable (1–30, default 3).

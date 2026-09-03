@@ -137,6 +137,8 @@ function submitAddItem() {
       </div>
     </header>
 
+    <slot name="confirm" />
+
     <form class="todo-add-row" @submit.prevent="submitAddItem">
       <label class="sr-only" :for="`new-item-${list.id}`">添加到 {{ list.title }}</label>
       <input

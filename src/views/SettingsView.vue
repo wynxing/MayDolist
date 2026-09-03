@@ -31,6 +31,7 @@ const syncBusy = ref(false);
 const syncMessage = ref("");
 const buildId = __BUILD_ID__;
 const pendingConfirm = ref<{
+  scope: "data" | "trash";
   message: string;
   confirmLabel: string;
   run: () => Promise<void>;
@@ -123,6 +124,7 @@ async function importData() {
       (preview.skippedCache ? `（将跳过损坏缓存 ${preview.skippedCache} 份）` : "") +
       `\n\n导入会覆盖当前数据，导入前会自动备份现有数据。确定继续？`;
     pendingConfirm.value = {
+      scope: "data",
       message: confirmText,
       confirmLabel: "导入并覆盖",
       run: async () => {
@@ -211,6 +213,7 @@ async function action(kind: string, id: string, command: string) {
 
 async function permanentlyDelete(kind: string, id: string, title: string) {
   pendingConfirm.value = {
+    scope: "trash",
     message: `永久删除“${title}”？此操作不可撤销。`,
     confirmLabel: "永久删除",
     run: async () => {
@@ -223,6 +226,7 @@ async function clearTrash() {
   const count = trashCount.value;
   if (!count) return;
   pendingConfirm.value = {
+    scope: "trash",
     message: `清空回收站中的 ${count} 项？此操作不可撤销。`,
     confirmLabel: "清空回收站",
     run: async () => {
@@ -251,15 +255,6 @@ async function runPendingConfirm() {
       <span v-if="message" class="settings-message" role="status">{{ message }}</span>
       <span class="build-id" :title="`Frontend build ${buildId}`">build {{ buildId }}</span>
     </header>
-
-    <ConfirmBar
-      v-if="pendingConfirm"
-      :message="pendingConfirm.message"
-      :confirm-label="pendingConfirm.confirmLabel"
-      danger
-      @confirm="runPendingConfirm"
-      @cancel="pendingConfirm = null"
-    />
 
     <div class="settings-section">
       <h3>常规设置</h3>
@@ -615,6 +610,14 @@ async function runPendingConfirm() {
         <button class="btn" :disabled="dataBusy" @click="createBackup">创建备份</button>
         <button class="btn" :disabled="dataBusy" @click="openDataDir">打开数据目录</button>
       </div>
+      <ConfirmBar
+        v-if="pendingConfirm && pendingConfirm.scope === 'data'"
+        :message="pendingConfirm.message"
+        :confirm-label="pendingConfirm.confirmLabel"
+        danger
+        @confirm="runPendingConfirm"
+        @cancel="pendingConfirm = null"
+      />
       <p v-if="dataMessage" class="settings-message data-message" role="status">
         {{ dataMessage }}
       </p>
@@ -635,6 +638,14 @@ async function runPendingConfirm() {
           清空回收站 ({{ trashCount }})
         </button>
       </div>
+      <ConfirmBar
+        v-if="pendingConfirm && pendingConfirm.scope === 'trash'"
+        :message="pendingConfirm.message"
+        :confirm-label="pendingConfirm.confirmLabel"
+        danger
+        @confirm="runPendingConfirm"
+        @cancel="pendingConfirm = null"
+      />
       <div class="trash-list">
         <template v-for="group in trashGroups" :key="group.kind">
           <div v-for="row in trash?.[group.key] ?? []" :key="row.id" class="trash-row">

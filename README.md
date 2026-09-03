@@ -194,7 +194,7 @@ pnpm gen:types
 
 ## 项目状态
 
-当前版本：`1.3.1`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
+当前版本：`1.3.2`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
 
 ## License
 

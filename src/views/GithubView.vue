@@ -342,14 +342,6 @@ function convertLabel(key: string) {
       />
     </div>
     <p v-if="s.error" class="error" role="alert">{{ s.error }}</p>
-    <ConfirmBar
-      v-if="pendingRemove"
-      :message="`移除仓库 ${pendingRemove}？本地缓存会一并删除。`"
-      confirm-label="移除"
-      danger
-      @confirm="confirmRemove"
-      @cancel="pendingRemove = null"
-    />
 
     <EmptyState
       v-if="!s.watchlist.length"
@@ -390,6 +382,14 @@ function convertLabel(key: string) {
           移除
         </button>
       </header>
+      <ConfirmBar
+        v-if="pendingRemove === watch.fullName"
+        :message="`移除仓库 ${pendingRemove}？本地缓存会一并删除。`"
+        confirm-label="移除"
+        danger
+        @confirm="confirmRemove"
+        @cancel="pendingRemove = null"
+      />
 
       <template v-if="!watch.collapsed">
         <div class="gh-filters">
