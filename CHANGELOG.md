@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3
+
+- Collapse the notes empty state into a single header CTA, and auto-select a note when any exist.
+
 ## 1.3.2
 
 - Show delete, import, and empty-trash confirm bars next to the action instead of at the top of the page.

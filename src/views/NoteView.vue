@@ -39,6 +39,7 @@ const selectedNote = computed(
 
 onMounted(async () => {
   await store.init();
+  const pending = pendingNoteId.value;
   watch(
     pendingNoteId,
     (id) => {
@@ -48,6 +49,7 @@ onMounted(async () => {
     },
     { immediate: true }
   );
+  if (!pending) ensureSelection();
 });
 
 function selectPending(id: string) {
@@ -65,6 +67,13 @@ function selectPending(id: string) {
     },
     { deep: true }
   );
+}
+
+function ensureSelection() {
+  if (selectedId.value && store.notes.some((note) => note.id === selectedId.value)) return;
+  const next = shown.value[0] ?? store.notes[0];
+  if (next) choose(next.id);
+  else selectedId.value = null;
 }
 
 async function applyNote(note: { title: string; content: string; tags: string[] }) {
@@ -136,6 +145,7 @@ async function confirmDelete() {
   await store.remove(selectedId.value);
   selectedId.value = null;
   pendingDelete.value = false;
+  ensureSelection();
 }
 
 watch([title, content, tagsText], () => {
@@ -145,10 +155,18 @@ watch([title, content, tagsText], () => {
   timer = window.setTimeout(save, 500);
 });
 
+watch(allTags, (tags) => {
+  if (selectedTag.value && !tags.includes(selectedTag.value)) selectedTag.value = "";
+});
+
 watch(
   () => store.notes,
   () => {
-    if (!selectedId.value || dirty.value || applyingRemote) return;
+    if (!selectedId.value || !store.notes.some((note) => note.id === selectedId.value)) {
+      ensureSelection();
+      return;
+    }
+    if (dirty.value || applyingRemote) return;
     const note = store.notes.find((value) => value.id === selectedId.value);
     if (!note) return;
     if (
@@ -176,10 +194,15 @@ watch(
       </template>
     </PageHeader>
 
-    <div class="pane-view">
+    <EmptyState
+      v-if="!store.notes.length"
+      title="还没有便签"
+      text="先新建一条，需要时再拖到桌面。"
+    />
+    <div v-else class="pane-view">
       <aside class="list-pane" aria-label="便签列表">
         <input v-model="query" class="input" placeholder="搜索标题、正文、标签" />
-        <select v-model="selectedTag" class="input">
+        <select v-if="allTags.length" v-model="selectedTag" class="input">
           <option value="">全部标签</option>
           <option v-for="tag in allTags" :key="tag">{{ tag }}</option>
         </select>
@@ -202,7 +225,7 @@ watch(
             }}</small>
           </button>
         </div>
-        <EmptyState v-else text="没有匹配的便签" action-label="新建便签" @action="add" />
+        <p v-else class="muted">没有匹配的便签</p>
       </aside>
       <div v-if="selectedId && selectedNote" class="editor-pane">
         <input v-model="title" class="input editor-title" aria-label="便签标题" />
@@ -247,13 +270,6 @@ watch(
           <button class="btn danger" type="button" @click="pendingDelete = true">删除</button>
         </div>
       </div>
-      <EmptyState
-        v-else
-        title="还没有打开便签"
-        text="选择左侧一条，或新建一条开始写。"
-        action-label="新建便签"
-        @action="add"
-      />
     </div>
   </section>
 </template>
