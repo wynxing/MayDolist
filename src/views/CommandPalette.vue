@@ -9,6 +9,7 @@ import * as paletteApi from "../api/palette";
 import * as quickApi from "../api/quick";
 import PinMark from "../components/PinMark.vue";
 import { useNoteStore } from "../stores/note";
+import { useSettingsStore } from "../stores/settings";
 import { useTodoStore } from "../stores/todo";
 import type {
   PaletteCommand,
@@ -312,6 +313,9 @@ function formatTime(iso: string) {
 }
 
 onMounted(async () => {
+  await useSettingsStore()
+    .init()
+    .catch(() => {});
   unlisten = await listen("command-palette-open", openPalette);
   openPalette();
 });

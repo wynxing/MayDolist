@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.4
+
+- Make the Ctrl+K command palette follow the app theme.
+- Open floating notes in front on a visible monitor, and show status when float fails.
+
 ## 1.3.3
 
 - Collapse the notes empty state into a single header CTA, and auto-select a note when any exist.

@@ -18,6 +18,7 @@ const tagsText = ref("");
 const status = ref("");
 const dirty = ref(false);
 const pendingDelete = ref(false);
+const floating = ref(false);
 let timer: number | undefined;
 let applyingRemote = false;
 
@@ -138,6 +139,20 @@ async function save() {
 async function setColor(color: string) {
   if (!selectedId.value) return;
   await store.update(selectedId.value, { color });
+}
+
+async function floatSelected() {
+  if (!selectedId.value || floating.value) return;
+  floating.value = true;
+  status.value = "正在打开悬浮窗…";
+  try {
+    await store.float(selectedId.value);
+    status.value = "已悬浮到桌面";
+  } catch (error) {
+    status.value = String(error);
+  } finally {
+    floating.value = false;
+  }
 }
 
 async function confirmDelete() {
@@ -266,7 +281,9 @@ watch(
           >
             {{ selectedNote.pinned ? "取消置顶" : "置顶" }}
           </button>
-          <button class="btn" type="button" @click="store.float(selectedId)">悬浮</button>
+          <button class="btn" type="button" :disabled="floating" @click="floatSelected">
+            悬浮
+          </button>
           <button class="btn danger" type="button" @click="pendingDelete = true">删除</button>
         </div>
       </div>

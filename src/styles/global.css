@@ -311,7 +311,7 @@ select:focus-visible {
 }
 
 .btn.ghost {
-  background: transparent;
+  background: rgb(255 255 255 / 0.04);
   border-color: transparent;
 }
 
@@ -461,6 +461,7 @@ textarea.input {
 
 .row-actions {
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
@@ -472,6 +473,7 @@ textarea.input {
 .palette-row:focus-within .row-actions,
 .palette-row.selected .row-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .note-color-dots {
@@ -2708,12 +2710,14 @@ textarea.input {
   display: flex;
   gap: 6px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
 .palette-row:hover .palette-row-actions,
 .palette-row.selected .palette-row-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .palette-action {
