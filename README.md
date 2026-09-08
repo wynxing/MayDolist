@@ -25,15 +25,6 @@ MayDolist 适合那些需要在编码、Review 和日常工作之间快速切换
 - `Enter` 提交，`Esc` 或右上角关闭按钮收起窗口；未提交的输入会保留。
 - `Ctrl+Alt+M` 或屏幕热角呼出 / 隐藏主面板。
 
-### 全局命令面板（Ctrl+K）
-
-在任何时候按 `Ctrl+K` 都会呼出轻量命令面板（快捷键可在设置中修改或关闭）：
-
-- 输入命令名直接执行：切换今日 / 待办 / 便签 / GitHub / 设置，新建 Todo、新建便签，立即备份或打开数据目录。
-- 输入任意关键词即搜即得（防抖 150ms）：并发检索未完成 Todo（含收件箱）、便签全文和 GitHub 本地缓存条目，结果按域分组，每域最多 8 条。
-- 对搜索结果就地操作：完成 Todo、打开来源、跳转对应模块、置顶便签；GitHub 离线时只显示本地缓存并标注「离线缓存」。
-- `↑` / `↓` 选择、`Enter` 执行、`Esc` 关闭；中文输入法组合输入不会误触发执行。
-
 ### 收件箱处理模式（triage）
 
 在「待办」页点击收件箱旁的「处理模式」，把收件箱逐条归零：
@@ -146,14 +137,14 @@ flowchart LR
 
 ```text
 src/                              Vue 3 + TS
-  App.vue                         ?note / ?quick / ?palette 分流四个窗口
+  App.vue                         ?note / ?quick 分流三个窗口
   views/  stores/  api/  components/
   types/generated/                ts-rs 从 Rust models 生成
   triage.ts                       Inbox 处理模式（纯前端）
 src-tauri/src/
   lib.rs                          AppState + 全部 Tauri command
   commands/                       IPC：校验后转 service
-  services/                       todo / note / github / focus / palette / backup
+  services/                       todo / note / github / focus / backup
   services/reminder.rs            到期判定（纯函数）；循环在 app/due_tracking.rs
   models/                         serde 模型
   storage/                        数据目录与原子写
@@ -194,7 +185,7 @@ pnpm gen:types
 
 ## 项目状态
 
-当前版本：`1.3.4`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、全局命令面板（Ctrl+K）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
+当前版本：`1.3.5`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
 
 ## License
 

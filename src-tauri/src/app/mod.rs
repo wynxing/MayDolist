@@ -1,7 +1,7 @@
 //! App shell: window lifecycle, tray, hotkeys, hot corner, badge and
 //! background loops. Split into focused submodules:
 //!
-//! - `windows`: main panel, quick capture, command palette and note windows
+//! - `windows`: main panel, quick capture and note windows
 //! - `tray`: tray icon and its context menu
 //! - `hotkeys`: global shortcuts and the screen-corner hover trigger
 //! - `badge`: overdue tray badge rendering
@@ -15,8 +15,7 @@ mod windows;
 
 pub use hotkeys::apply_hotkeys;
 pub use windows::{
-    hide_command_palette, hide_main, hide_quick_capture, show_main, show_note, show_quick_capture,
-    COMMAND_PALETTE_WINDOW, QUICK_CAPTURE_WINDOW,
+    hide_main, hide_quick_capture, show_main, show_note, show_quick_capture, QUICK_CAPTURE_WINDOW,
 };
 
 use crate::{
@@ -88,16 +87,6 @@ pub fn setup(app: &mut tauri::App) -> AppResult<()> {
         apply_acrylic(&quick_capture);
         let window = quick_capture.clone();
         quick_capture.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                window.hide().ok();
-            }
-        });
-    }
-    if let Some(command_palette) = app.get_webview_window(COMMAND_PALETTE_WINDOW) {
-        apply_acrylic(&command_palette);
-        let window = command_palette.clone();
-        command_palette.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 window.hide().ok();

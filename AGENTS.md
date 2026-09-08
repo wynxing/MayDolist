@@ -25,7 +25,7 @@ Command 不写业务。改功能只动 architecture 代码地图里的文件。
 ## 不做
 
 云同步、多端、应用内 GitHub 登录/存 token、换数据库、GitHub 写操作。
-Focus / Palette / triage 不自建持久化。
+Focus / triage 不自建持久化。
 
 ## 命令
 

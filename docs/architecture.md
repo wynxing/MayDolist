@@ -1,10 +1,10 @@
 # MayDolist 架构
 
-> 现行系统地图 · 对照代码 `1.3.4` · 2026-09-08
+> 现行系统地图 · 对照代码 `1.3.5` · 2026-09-08
 >
 > 产品体验见 [README](../README.md)。字段以 `src-tauri/src/models/` 为准，改模型后跑 `pnpm gen:types` 并提交 `src/types/generated/`。
 
-Windows 本地桌面收件箱：1 个 Rust 主进程 + 多个 WebView2（主面板、悬浮便签、快速收集、命令面板）。前端不碰磁盘；GitHub 只通过本机 `gh` CLI。
+Windows 本地桌面收件箱：1 个 Rust 主进程 + 多个 WebView2（主面板、悬浮便签、快速收集）。前端不碰磁盘；GitHub 只通过本机 `gh` CLI。
 
 ## 目录
 
@@ -66,8 +66,8 @@ sequenceDiagram
 
 ```text
 src/                              Vue 3 + TS
-  App.vue                         ?note / ?quick / ?palette 分流四个窗口
-  views/                          主面板 Tab、悬浮便签、快速收集、命令面板
+  App.vue                         ?note / ?quick 分流三个窗口
+  views/                          主面板 Tab、悬浮便签、快速收集
   stores/                         Pinia；跨窗口靠 entitySync 订 entity-changed
   api/                            唯一 invoke 入口（call + ApiError）
   components/                     列表行、triage、确认条等
@@ -76,7 +76,7 @@ src/                              Vue 3 + TS
 src-tauri/src/
   lib.rs                          AppState；注册全部 Tauri command
   commands/                       IPC：参数校验、错误转换，转给 service / app
-  services/                       领域：todo / note / github / focus / palette / backup
+  services/                       领域：todo / note / github / focus / backup
   services/reminder.rs            到期判定纯函数（不在 Services 结构体里）
   models/                         serde 模型；#[ts(export)] → src/types/generated/
   storage/                        数据目录、原子写、config 缓存、域替换
@@ -100,7 +100,7 @@ src-tauri/src/
 | 备份 / 导入 | [`services/backup.rs`](../src-tauri/src/services/backup.rs)、[`commands/backup.rs`](../src-tauri/src/commands/backup.rs) | [`api/backup.ts`](../src/api/backup.ts)、[`views/SettingsView.vue`](../src/views/SettingsView.vue) |
 | 回收站 | [`commands/trash.rs`](../src-tauri/src/commands/trash.rs)（复用 todo / note 的软删除字段） | 设置页 |
 | 应用内更新 | [`commands/update.rs`](../src-tauri/src/commands/update.rs)、`tauri.conf.json` updater | [`api/update.ts`](../src/api/update.ts)、[`stores/update.ts`](../src/stores/update.ts) |
-| 配置 | [`models/config.rs`](../src-tauri/src/models/config.rs)（`CONFIG_SCHEMA_VERSION = 3`）、[`commands/settings.rs`](../src-tauri/src/commands/settings.rs) | [`stores/settings.ts`](../src/stores/settings.ts) |
+| 配置 | [`models/config.rs`](../src-tauri/src/models/config.rs)（`CONFIG_SCHEMA_VERSION = 4`）、[`commands/settings.rs`](../src-tauri/src/commands/settings.rs) | [`stores/settings.ts`](../src/stores/settings.ts) |
 
 Command 清单以 [`lib.rs`](../src-tauri/src/lib.rs) 的 `invoke_handler` 为准。
 
@@ -115,7 +115,6 @@ Command 清单以 [`lib.rs`](../src-tauri/src/lib.rs) 的 `invoke_handler` 为�
 | [`services/todo.rs`](../src-tauri/src/services/todo.rs) / [`note.rs`](../src-tauri/src/services/note.rs) | 列表与条目、Inbox `kind=inbox`、来源 Todo、周期实例 | UI |
 | [`services/github/`](../src-tauri/src/services/github/) | 见下一表 | UI；不存 GitHub token |
 | [`services/focus.rs`](../src-tauri/src/services/focus.rs) | 只读投影：并行加载 Todo / Note / GitHub，局部失败隔离 | 任何写路径 |
-| [`services/palette.rs`](../src-tauri/src/services/palette.rs) | 命令匹配 + 三域并发搜索（每域上限 8） | 新写路径；GitHub 只读本地缓存 |
 | [`services/backup.rs`](../src-tauri/src/services/backup.rs) | ZIP 导出 / 导入校验 / 备份轮转（最近 10 份） | UI |
 | [`services/reminder.rs`](../src-tauri/src/services/reminder.rs) | 纯函数：哪些 Todo 到期该提醒 | 不持 Storage；不弹 Toast |
 | [`storage/`](../src-tauri/src/storage/) | 目录解析、JSON 原子写、config 内存缓存、损坏隔离 | GitHub 网络 |
@@ -139,7 +138,7 @@ GitHub 服务已拆开（[`services/github/mod.rs`](../src-tauri/src/services/gi
 
 | 位置 | 职责 |
 | --- | --- |
-| [`views/`](../src/views/) | 主面板 Tab（Focus / Todo / 便签 / GitHub / 设置）、`FloatingNote`、`QuickCapture`、`CommandPalette` |
+| [`views/`](../src/views/) | 主面板 Tab（Focus / Todo / 便签 / GitHub / 设置）、`FloatingNote`、`QuickCapture` |
 | [`stores/`](../src/stores/) | UI 状态与缓存；[`entitySync.ts`](../src/stores/entitySync.ts) 单次监听 `entity-changed` 并防抖刷新 |
 | [`api/`](../src/api/) | `call()` 封装 invoke，把 `AppError` 收成 `ApiError` |
 | [`components/`](../src/components/) | 可复用卡片、行、triage、确认条 |
@@ -152,7 +151,7 @@ GitHub 服务已拆开（[`services/github/mod.rs`](../src-tauri/src/services/gi
 
 ```text
 MayDolist/
-├── config.json              # 单例；schemaVersion 当前为 3
+├── config.json              # 单例；schemaVersion 当前为 4
 ├── backups/                 # 时间戳 ZIP，保留最近 10 份
 ├── logs/app.log             # 不进导出包
 ├── notes/<id>.json
@@ -176,10 +175,9 @@ MayDolist/
 | --- | --- | --- |
 | `main` | `tauri.conf.json`，启动可隐藏 | `App.vue` 默认 → `MainBoard.vue` |
 | `quick-capture` | 配置里预创建，默认隐藏 | `index.html?quick` |
-| `command-palette` | 同上；呼出时居中到光标所在屏 | `index.html?palette` |
 | `note-<uuid>` | 运行时按便签创建 | `index.html?note=<id>` |
 
-能力集：[`capabilities/default.json`](../src-tauri/capabilities/default.json)（`main`、`note-*`、`quick-capture`、`command-palette`）。前端无文件系统权限。
+能力集：[`capabilities/default.json`](../src-tauri/capabilities/default.json)（`main`、`note-*`、`quick-capture`）。前端无文件系统权限。
 
 ### 事件
 
@@ -218,17 +216,17 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 
 **演进（新代码）**
 
-工程准则见 [AGENTS.md](../AGENTS.md)。Focus、命令面板、triage **不**为自身新增持久化格式。非法组合在 service 层拒绝写入。
+工程准则见 [AGENTS.md](../AGENTS.md)。Focus、triage **不**为自身新增持久化格式。非法组合在 service 层拒绝写入。
 
 **一致性**
 
 - 单写者；先盘后事件。
 - `github/cache` 可丢，watchlist 与用户实体不可丢。
-- Focus / Palette 只读本地快照，刷新失败保留旧缓存并记 `lastError`。
+- Focus 只读本地快照，刷新失败保留旧缓存并记 `lastError`。
 
 ## 相关文档
 
 - [README](../README.md)：产品、开发运行、质量检查。
 - [AGENTS.md](../AGENTS.md)：给编码代理的开发硬约束。
 - [building.md](building.md)：CI、NSIS、Release 签名与 updater。
-- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.4`）。
+- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.5`）。

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.5
+
+- Remove the Ctrl+K command palette.
+
 ## 1.3.4
 
 - Make the Ctrl+K command palette follow the app theme.

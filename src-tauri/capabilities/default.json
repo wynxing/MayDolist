@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window, floating notes, quick capture and command palette",
-  "windows": ["main", "note-*", "quick-capture", "command-palette"],
+  "description": "Capability for the main window, floating notes and quick capture",
+  "windows": ["main", "note-*", "quick-capture"],
   "permissions": [
     "core:default",
     "core:window:allow-set-size",

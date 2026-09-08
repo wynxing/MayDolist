@@ -1,5 +1,5 @@
-//! Window lifecycle: main panel, quick capture, command palette and the
-//! dynamically-created floating note windows, plus the shared acrylic effect.
+//! Window lifecycle: main panel, quick capture and the dynamically-created
+//! floating note windows, plus the shared acrylic effect.
 
 use crate::{
     error::{AppError, AppResult},
@@ -74,42 +74,6 @@ pub fn toggle_quick_capture(app: &AppHandle) -> AppResult<()> {
         window.hide().map_err(internal)
     } else {
         show_quick_capture(app)
-    }
-}
-
-pub const COMMAND_PALETTE_WINDOW: &str = "command-palette";
-
-/// Show (and focus) the command palette window, centered on the monitor that
-/// currently contains the cursor (falling back to the primary monitor), then
-/// tell the view to focus and select its input. The window is declared hidden
-/// in tauri.conf.json so this only ever reuses an already-created webview.
-pub fn show_command_palette(app: &AppHandle) -> AppResult<()> {
-    let window = app
-        .get_webview_window(COMMAND_PALETTE_WINDOW)
-        .ok_or_else(|| AppError::NotFound("command palette window".into()))?;
-    apply_acrylic(&window);
-    center_on_cursor_or_primary(&window)?;
-    window.show().map_err(internal)?;
-    window.set_focus().map_err(internal)?;
-    app.emit_to(COMMAND_PALETTE_WINDOW, "command-palette-open", ())
-        .map_err(internal)
-}
-
-pub fn hide_command_palette(app: &AppHandle) -> AppResult<()> {
-    if let Some(window) = app.get_webview_window(COMMAND_PALETTE_WINDOW) {
-        window.hide().map_err(internal)?;
-    }
-    Ok(())
-}
-
-pub fn toggle_command_palette(app: &AppHandle) -> AppResult<()> {
-    let window = app
-        .get_webview_window(COMMAND_PALETTE_WINDOW)
-        .ok_or_else(|| AppError::NotFound("command palette window".into()))?;
-    if window.is_visible().map_err(internal)? {
-        window.hide().map_err(internal)
-    } else {
-        show_command_palette(app)
     }
 }
 
@@ -212,10 +176,10 @@ fn bring_note_forward(window: &WebviewWindow) -> AppResult<()> {
     window.set_focus().map_err(internal)
 }
 
-/// Center the palette window on the monitor containing the cursor, falling
-/// back to the primary monitor when the cursor is not on any known monitor
-/// (e.g. a monitor was unplugged). Cursor, monitor and window sizes are all
-/// reported in physical pixels, so the math is done without DPI conversion.
+/// Center a window on the monitor containing the cursor, falling back to the
+/// primary monitor when the cursor is not on any known monitor (e.g. a
+/// monitor was unplugged). Cursor, monitor and window sizes are all reported
+/// in physical pixels, so the math is done without DPI conversion.
 fn center_on_cursor_or_primary(window: &WebviewWindow) -> AppResult<()> {
     let cursor = window.cursor_position().ok();
     let target = cursor

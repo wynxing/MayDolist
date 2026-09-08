@@ -22,14 +22,6 @@ quickCaptureHotkey: string,
  */
 quickCaptureEnabled: boolean, 
 /**
- * Global hotkey for the command palette window (e.g. "Ctrl+K").
- */
-commandPaletteHotkey: string, 
-/**
- * Whether the command palette window and its hotkey are enabled.
- */
-commandPaletteEnabled: boolean, 
-/**
  * Days after which an open GitHub item is flagged "长期未更新".
  * 0 disables the stale signal.
  */

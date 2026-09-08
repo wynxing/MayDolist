@@ -107,8 +107,6 @@ pub fn run() {
             commands::quick_capture::quick_capture_submit,
             commands::quick_capture::quick_capture_hide,
             commands::quick_capture::quick_capture_show,
-            commands::palette::palette_search,
-            commands::palette::palette_hide,
             commands::trash::trash_list,
             commands::trash::trash_restore,
             commands::trash::trash_delete_permanently,

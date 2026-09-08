@@ -26,7 +26,7 @@ pub struct NoteService {
     /// cannot overwrite each other with stale whole-note snapshots.
     write_lock: Mutex<()>,
     /// Full on-disk notes (including deleted). Invalidated on every write so
-    /// readers (focus overview, palette, floating windows) do not rescan JSON.
+    /// readers (focus overview, floating windows) do not rescan JSON.
     cache: Mutex<NoteCache>,
 }
 

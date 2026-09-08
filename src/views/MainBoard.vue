@@ -79,10 +79,6 @@ onMounted(async () => {
     active.value = "focus";
     focus.requestFocus(e.payload);
   });
-  await listen<{ tab: string; noteId?: string }>("command-palette-navigate", (e) => {
-    if (e.payload.noteId) openNoteInModule(e.payload.noteId);
-    active.value = e.payload.tab;
-  });
 });
 </script>
 
@@ -117,9 +113,6 @@ onMounted(async () => {
         </li>
         <li>
           <kbd>{{ settings.config?.quickCaptureHotkey || "Ctrl+Alt+Space" }}</kbd> 快速收集
-        </li>
-        <li>
-          <kbd>{{ settings.config?.commandPaletteHotkey || "Ctrl+K" }}</kbd> 命令面板
         </li>
       </ul>
       <p>数据目录：{{ settings.config?.dataDir }}</p>

@@ -35,13 +35,13 @@ pub struct TodoService {
     /// duplicate "收件箱" lists.
     inbox_lock: Mutex<()>,
     /// Full on-disk lists (including deleted). Invalidated on every write so
-    /// the reminder loop and Focus/palette reads do not rescan JSON every tick.
+    /// the reminder loop and Focus reads do not rescan JSON every tick.
     cache: Mutex<TodoCache>,
 }
 
 /// Shared read projections of the todo data. Both variants are built once per
 /// invalidation and handed out as `Arc` clones, so frequent readers (due
-/// tracking, focus overview, palette) never deep-clone the whole tree.
+/// tracking, focus overview) never deep-clone the whole tree.
 #[derive(Default)]
 struct TodoCache {
     full: Option<Arc<Vec<TodoList>>>,

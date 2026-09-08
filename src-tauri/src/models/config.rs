@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 use crate::error::{AppError, AppResult};
 
-pub const CONFIG_SCHEMA_VERSION: u32 = 3;
+pub const CONFIG_SCHEMA_VERSION: u32 = 4;
 
 /// Allowed range for glass background opacity (40%..=100%).
 pub const GLASS_OPACITY_MIN: f64 = 0.4;
@@ -26,14 +26,6 @@ fn default_quick_capture_hotkey() -> String {
 }
 
 fn default_quick_capture_enabled() -> bool {
-    true
-}
-
-fn default_command_palette_hotkey() -> String {
-    "Ctrl+K".into()
-}
-
-fn default_command_palette_enabled() -> bool {
     true
 }
 
@@ -140,12 +132,6 @@ pub struct AppConfig {
     /// Whether the quick capture window and its hotkey are enabled.
     #[serde(default = "default_quick_capture_enabled")]
     pub quick_capture_enabled: bool,
-    /// Global hotkey for the command palette window (e.g. "Ctrl+K").
-    #[serde(default = "default_command_palette_hotkey")]
-    pub command_palette_hotkey: String,
-    /// Whether the command palette window and its hotkey are enabled.
-    #[serde(default = "default_command_palette_enabled")]
-    pub command_palette_enabled: bool,
     /// Days after which an open GitHub item is flagged "长期未更新".
     /// 0 disables the stale signal.
     #[serde(default = "default_github_stale_days")]
@@ -186,10 +172,6 @@ impl AppConfig {
         if self.quick_capture_hotkey.trim().is_empty() {
             self.quick_capture_hotkey = default_quick_capture_hotkey();
         }
-        let palette_hotkey_before = self.command_palette_hotkey.clone();
-        if self.command_palette_hotkey.trim().is_empty() {
-            self.command_palette_hotkey = default_command_palette_hotkey();
-        }
         let main_before = self.main_window_glass_opacity;
         self.main_window_glass_opacity = if self.main_window_glass_opacity.is_finite() {
             self.main_window_glass_opacity
@@ -218,7 +200,6 @@ impl AppConfig {
             .clamp(TRIAGE_LATER_DAYS_MIN, TRIAGE_LATER_DAYS_MAX);
         schema_before != self.schema_version
             || quick_hotkey_before != self.quick_capture_hotkey
-            || palette_hotkey_before != self.command_palette_hotkey
             || main_before != self.main_window_glass_opacity
             || floating_before != self.floating_note_glass_opacity
             || quiet_before != self.quiet_hours
@@ -235,8 +216,6 @@ impl Default for AppConfig {
             hotkey: "Ctrl+Alt+M".into(),
             quick_capture_hotkey: default_quick_capture_hotkey(),
             quick_capture_enabled: default_quick_capture_enabled(),
-            command_palette_hotkey: default_command_palette_hotkey(),
-            command_palette_enabled: default_command_palette_enabled(),
             github_stale_days: default_github_stale_days(),
             github_sync_enabled: default_github_sync_enabled(),
             github_auto_complete_todos: default_github_auto_complete_todos(),
@@ -310,57 +289,6 @@ mod tests {
         assert_eq!(config.github_stale_days, 14);
         assert!(config.github_sync_enabled);
         assert!(config.github_auto_complete_todos);
-    }
-
-    #[test]
-    fn defaults_include_command_palette_settings() {
-        let config = AppConfig::default();
-        assert_eq!(config.command_palette_hotkey, "Ctrl+K");
-        assert!(config.command_palette_enabled);
-    }
-
-    #[test]
-    fn legacy_config_receives_command_palette_defaults() {
-        let json = r#"{
-            "schemaVersion": 2,
-            "dataDir": null,
-            "hotCorner": "top-right",
-            "hotkey": "Ctrl+Alt+M",
-            "theme": "dark",
-            "githubRefreshIntervalMinutes": 30,
-            "autostart": false,
-            "firstRun": true
-        }"#;
-        let restored: AppConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(restored.command_palette_hotkey, "Ctrl+K");
-        assert!(restored.command_palette_enabled);
-        let json = serde_json::to_string(&restored).unwrap();
-        assert!(json.contains("\"commandPaletteHotkey\":\"Ctrl+K\""));
-        assert!(json.contains("\"commandPaletteEnabled\":true"));
-    }
-
-    #[test]
-    fn command_palette_fields_roundtrip_through_serde_camel_case() {
-        let config = AppConfig {
-            command_palette_hotkey: "Ctrl+Shift+P".into(),
-            command_palette_enabled: false,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("\"commandPaletteHotkey\":\"Ctrl+Shift+P\""));
-        assert!(json.contains("\"commandPaletteEnabled\":false"));
-        let restored: AppConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored, config);
-    }
-
-    #[test]
-    fn sanitize_replaces_empty_command_palette_hotkey() {
-        let mut config = AppConfig {
-            command_palette_hotkey: "  ".into(),
-            ..Default::default()
-        };
-        assert!(config.sanitize());
-        assert_eq!(config.command_palette_hotkey, "Ctrl+K");
     }
 
     #[test]
