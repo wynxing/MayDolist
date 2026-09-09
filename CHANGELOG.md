@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.6
+
+- Hand off GitHub PRs/Issues to Todos: incomplete linked items leave the GitHub list and Focus GitHub section, and return if still open after the Todo is completed or deleted.
+
 ## 1.3.5
 
 - Remove the Ctrl+K command palette.

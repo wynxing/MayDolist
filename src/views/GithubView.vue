@@ -26,9 +26,7 @@ const repoBusy = reactive<Record<string, boolean>>({});
 const pinDrafts = reactive<Record<string, string>>({});
 const pinBusy = reactive<Record<string, boolean>>({});
 const pinErrors = reactive<Record<string, string | null>>({});
-const convertState = reactive<
-  Record<string, { phase: "idle" | "saving" | "ok" | "error"; message: string }>
->({});
+const convertState = reactive<Record<string, { phase: "saving" | "error"; message: string }>>({});
 
 const filters = [
   ["mine", "我的"],
@@ -40,7 +38,10 @@ const filters = [
 
 const signalFilters = SIGNAL_FILTER_OPTIONS;
 
-onMounted(() => s.init());
+onMounted(() => {
+  void s.init();
+  void todo.init();
+});
 
 const snapshotMap = computed(() => {
   const map = new Map<string, RepoSnapshot>();
@@ -52,6 +53,21 @@ function snapFor(watch: RepoWatch) {
   return snapshotMap.value.get(watch.fullName);
 }
 
+const handedOffKeys = computed(() => {
+  const keys = new Set<string>();
+  for (const list of todo.lists) {
+    for (const item of list.items) {
+      if (item.completed || !item.source) continue;
+      keys.add(`${item.source.repo}:${item.source.number}`);
+    }
+  }
+  return keys;
+});
+
+function isHandedOff(repoName: string, number: number) {
+  return handedOffKeys.value.has(`${repoName}:${number}`);
+}
+
 function visiblePrs(watch: RepoWatch) {
   const snap = snapFor(watch);
   if (!snap) return [];
@@ -61,6 +77,7 @@ function visiblePrs(watch: RepoWatch) {
   return snap.pullRequests.filter(
     (pr) =>
       !ignored.has(pr.number) &&
+      !isHandedOff(watch.fullName, pr.number) &&
       passesSignalFilter(watch, pr.signals) &&
       matchesText(watch, pr.title)
   );
@@ -75,6 +92,7 @@ function visibleIssues(watch: RepoWatch) {
   return snap.issues.filter(
     (issue) =>
       !ignored.has(issue.number) &&
+      !isHandedOff(watch.fullName, issue.number) &&
       passesSignalFilter(watch, issue.signals) &&
       matchesText(watch, issue.title)
   );
@@ -267,27 +285,19 @@ async function convertToTodo(
   if (convertState[key]?.phase === "saving") return;
   convertState[key] = { phase: "saving", message: "" };
   try {
-    const result = await todo.createFromGithub({
+    await todo.createFromGithub({
       kind: kind === "pr" ? "github-pr" : "github-issue",
       repo: repoName,
       number: item.number,
       title: item.title,
       url: item.url,
     });
-    convertState[key] = {
-      phase: "ok",
-      message: result.alreadyExisted ? `已存在：${result.title}` : `已转为 Todo：${result.title}`,
-    };
-    window.setTimeout(() => {
-      if (convertState[key]?.phase === "ok") {
-        convertState[key] = { phase: "idle", message: "" };
-      }
-    }, 4000);
+    delete convertState[key];
   } catch (err) {
     convertState[key] = { phase: "error", message: String(err) };
     window.setTimeout(() => {
       if (convertState[key]?.phase === "error") {
-        convertState[key] = { phase: "idle", message: "" };
+        delete convertState[key];
       }
     }, 6000);
   }
@@ -296,7 +306,6 @@ async function convertToTodo(
 function convertLabel(key: string) {
   const state = convertState[key];
   if (state?.phase === "saving") return "保存中…";
-  if (state?.phase === "ok") return "已转入";
   if (state?.phase === "error") return "重试";
   return "转为 Todo";
 }
@@ -307,7 +316,7 @@ function convertLabel(key: string) {
     <PageHeader
       heading-id="github-heading"
       title="GitHub"
-      subtitle="追踪需要行动的 PR 与 Issue，一键转成带来源的 Todo。"
+      subtitle="追踪需要行动的 PR 与 Issue；转入待办后从本页消失，在待办里跟进。"
     >
       <template #actions>
         <button class="btn" type="button" :disabled="busy || !s.watchlist.length" @click="refresh">
@@ -512,16 +521,7 @@ function convertLabel(key: string) {
                 {{ convertLabel(convertKey(watch.fullName, "pr", pr.number)) }}
               </button>
               <small
-                v-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'ok'"
-                class="gh-convert-ok"
-                :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
-              >
-                {{ convertState[convertKey(watch.fullName, "pr", pr.number)]!.message }}
-              </small>
-              <small
-                v-else-if="
-                  convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'
-                "
+                v-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'"
                 class="error gh-convert-error"
                 :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
               >
@@ -586,15 +586,6 @@ function convertLabel(key: string) {
               </button>
               <small
                 v-if="
-                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'ok'
-                "
-                class="gh-convert-ok"
-                :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
-              >
-                {{ convertState[convertKey(watch.fullName, "issue", issue.number)]!.message }}
-              </small>
-              <small
-                v-else-if="
                   convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'error'
                 "
                 class="error gh-convert-error"

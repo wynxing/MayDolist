@@ -111,7 +111,11 @@ impl FocusService {
                 Err(err) => errors.push(format!("{}: {err}", watch.full_name)),
             }
         }
-        let (items, offline_cache) = project_github(&watchlist, &snapshots, &status);
+        let (mut items, offline_cache) = project_github(&watchlist, &snapshots, &status);
+        if let Ok(lists) = self.todo.list(false) {
+            let keys = handed_off_github_keys(&lists);
+            hide_handed_off_github(&mut items, &keys);
+        }
         let total = items.len();
         FocusSection {
             state: if errors.is_empty() {
@@ -350,6 +354,31 @@ pub fn project_github(
     });
     let offline_cache = !status.logged_in || snapshots.iter().any(|s| s.last_error.is_some());
     (items, offline_cache)
+}
+
+/// Incomplete GitHub-sourced Todos, keyed by `repo` + `number` (GitHub's
+/// shared issue/PR number space). Callers hide matching snapshot rows so
+/// handed-off work only appears as a Todo.
+fn handed_off_github_keys(lists: &[TodoList]) -> HashSet<(String, u64)> {
+    let mut keys = HashSet::new();
+    for list in lists {
+        if list.deleted {
+            continue;
+        }
+        for item in &list.items {
+            if item.deleted || item.completed {
+                continue;
+            }
+            if let Some(source) = &item.source {
+                keys.insert((source.repo.clone(), source.number));
+            }
+        }
+    }
+    keys
+}
+
+fn hide_handed_off_github(items: &mut Vec<FocusGithub>, keys: &HashSet<(String, u64)>) {
+    items.retain(|item| !keys.contains(&(item.repo.clone(), item.number)));
 }
 
 fn preview_of(content: &str) -> String {
@@ -747,6 +776,104 @@ mod tests {
             .iter()
             .any(|v| v.signals.contains(&crate::models::ActionSignal::Stale)));
         assert!(!items.iter().any(|v| v.number == 104));
+    }
+
+    #[test]
+    fn incomplete_github_source_hides_matching_focus_item() {
+        use crate::models::TodoSource;
+
+        let mut snap = snapshot("owner/repo");
+        snap.pull_requests = vec![
+            pr(7, "open", "2026-08-01T00:00:00Z", &["mine"]),
+            pr(8, "open", "2026-08-01T00:00:00Z", &["mine"]),
+        ];
+        let status = GhAuthStatus {
+            state: "authenticated".into(),
+            logged_in: true,
+            user: Some("wynxing".into()),
+            version: Some("gh 2.97.0".into()),
+            message: String::new(),
+        };
+        let (mut items, _) = project_github(&[], &[snap], &status);
+        assert_eq!(items.len(), 2);
+
+        let mut inbox = todo_list("inbox", "收件箱", Some(INBOX_KIND), 0);
+        let mut open_item = todo_item("t7", "跟进 PR", false, 0);
+        open_item.source = Some(TodoSource {
+            kind: "github-pr".into(),
+            repo: "owner/repo".into(),
+            number: 7,
+            url: "https://github.com/owner/repo/pull/7".into(),
+        });
+        let mut done_item = todo_item("t8", "已完成 PR", true, 1);
+        done_item.source = Some(TodoSource {
+            kind: "github-pr".into(),
+            repo: "owner/repo".into(),
+            number: 8,
+            url: "https://github.com/owner/repo/pull/8".into(),
+        });
+        inbox.items = vec![open_item, done_item];
+
+        let keys = handed_off_github_keys(&[inbox]);
+        hide_handed_off_github(&mut items, &keys);
+        let numbers: Vec<u64> = items.iter().map(|v| v.number).collect();
+        assert_eq!(
+            numbers,
+            vec![8],
+            "completed source must not hide the GitHub row"
+        );
+    }
+
+    #[test]
+    fn overview_hides_handed_off_github_item() {
+        use crate::services::Services;
+        use crate::storage::Storage;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::with_dir(tmp.path()).unwrap());
+        let services = Services::new(storage.clone());
+
+        services
+            .todo
+            .create_item_from_github(
+                "github-pr",
+                "owner/repo",
+                7,
+                "跟进 PR",
+                "https://github.com/owner/repo/pull/7",
+            )
+            .unwrap();
+
+        let mut snap = snapshot("owner/repo");
+        snap.pull_requests = vec![
+            pr(7, "open", "2026-08-01T00:00:00Z", &["mine"]),
+            pr(8, "open", "2026-08-01T00:00:00Z", &["mine"]),
+        ];
+        storage
+            .write_json(
+                &storage.data_dir().join("github/cache/owner_repo.json"),
+                &snap,
+            )
+            .unwrap();
+        storage
+            .write_json(
+                &storage.data_dir().join("github/watchlist.json"),
+                &vec![RepoWatch {
+                    full_name: "owner/repo".into(),
+                    filters: vec!["mine".into()],
+                    collapsed: false,
+                    ignored: vec![],
+                    pinned: vec![],
+                    signal_filters: vec![],
+                }],
+            )
+            .unwrap();
+
+        let overview = services.focus.overview();
+        let numbers: Vec<u64> = overview.github.items.iter().map(|v| v.number).collect();
+        assert_eq!(numbers, vec![8]);
+        assert_eq!(overview.github.total, 1);
+        assert_eq!(overview.todo.total, 1);
     }
 
     #[test]

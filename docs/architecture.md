@@ -1,6 +1,6 @@
 # MayDolist 架构
 
-> 现行系统地图 · 对照代码 `1.3.5` · 2026-09-08
+> 现行系统地图 · 对照代码 `1.3.6` · 2026-09-09
 >
 > 产品体验见 [README](../README.md)。字段以 `src-tauri/src/models/` 为准，改模型后跑 `pnpm gen:types` 并提交 `src/types/generated/`。
 
@@ -114,7 +114,7 @@ Command 清单以 [`lib.rs`](../src-tauri/src/lib.rs) 的 `invoke_handler` 为�
 | [`commands/`](../src-tauri/src/commands/) | 前端唯一 IPC；校验后转 service | 业务规则、直接写盘 |
 | [`services/todo.rs`](../src-tauri/src/services/todo.rs) / [`note.rs`](../src-tauri/src/services/note.rs) | 列表与条目、Inbox `kind=inbox`、来源 Todo、周期实例 | UI |
 | [`services/github/`](../src-tauri/src/services/github/) | 见下一表 | UI；不存 GitHub token |
-| [`services/focus.rs`](../src-tauri/src/services/focus.rs) | 只读投影：并行加载 Todo / Note / GitHub，局部失败隔离 | 任何写路径 |
+| [`services/focus.rs`](../src-tauri/src/services/focus.rs) | 只读投影：并行加载 Todo / Note / GitHub，局部失败隔离；未完成来源 Todo 挡住 Focus GitHub 区同号条目 | 任何写路径 |
 | [`services/backup.rs`](../src-tauri/src/services/backup.rs) | ZIP 导出 / 导入校验 / 备份轮转（最近 10 份） | UI |
 | [`services/reminder.rs`](../src-tauri/src/services/reminder.rs) | 纯函数：哪些 Todo 到期该提醒 | 不持 Storage；不弹 Toast |
 | [`storage/`](../src-tauri/src/storage/) | 目录解析、JSON 原子写、config 内存缓存、损坏隔离 | GitHub 网络 |
@@ -162,7 +162,7 @@ MayDolist/
 ```
 
 - 实体一文件，文件名 = UUID。每份 JSON 有 `schemaVersion`；新字段一律可选 + serde 默认值，缺省不落盘。
-- Todo 列表用 `kind=inbox` 标记系统收件箱。条目可带 `source`（`github-issue` / `github-pr`）、`githubSync`、`dueDate` / `remindAt` / `repeat`。
+- Todo 列表用 `kind=inbox` 标记系统收件箱。条目可带 `source`（`github-issue` / `github-pr`）、`githubSync`、`dueDate` / `remindAt` / `repeat`。未完成的来源 Todo 在**读时**从 GitHub 视图与 Focus GitHub 区隐藏（不改 watchlist / cache）；完成或删除后，若远程仍 open 且命中筛选则重新出现。
 - 写入：进程内 Mutex 串行；临时文件 + 重命名。先写盘成功再广播。
 - JSON 损坏：隔离该文件，不拖垮整个数据目录。
 - 导出 / 备份是同一 ZIP 布局（`packageSchemaVersion = 1`）：`manifest.json` + config + notes + todos + github watchlist，可选 cache。不含 `logs/`、`backups/`、token。导入先在 staging 校验（版本、路径穿越、可解析），再备份当前数据后持锁交换；失败逐项回滚。
@@ -229,4 +229,4 @@ Demo：`pnpm demo` → 进程参数 `--demo`，数据在系统临时目录，不
 - [README](../README.md)：产品、开发运行、质量检查。
 - [AGENTS.md](../AGENTS.md)：给编码代理的开发硬约束。
 - [building.md](building.md)：CI、NSIS、Release 签名与 updater。
-- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.5`）。
+- [CHANGELOG](../CHANGELOG.md)：版本演进（当前 `1.3.6`）。

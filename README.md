@@ -44,7 +44,7 @@ Todo 支持多个清单、完成、排序、软删除和 GitHub 来源关联；�
 
 ### GitHub 追踪
 
-按仓库组织 PR 和 Issue，支持「我的」「被提及」「被分配」「参与」等筛选，并显示需要处理、需要 Review、CI 失败、长期未更新和 Draft 等行动信号。条目可以直接打开 GitHub 原文，或一键转成带来源的 Todo。刷新后会同步已关联来源：PR 合并或 Issue/PR 关闭时默认自动完成对应 Todo；来源重新打开时不会自动重开本地待办，网络失败也不会误完成。
+按仓库组织 PR 和 Issue，支持「我的」「被提及」「被分配」「参与」等筛选，并显示需要处理、需要 Review、CI 失败、长期未更新和 Draft 等行动信号。条目可以直接打开 GitHub 原文，或一键转成带来源的 Todo；转入后未完成待办会从 GitHub 列表和今日 GitHub 区消失，完成或删除后若远程仍 open 则重新出现。刷新后会同步已关联来源：PR 合并或 Issue/PR 关闭时默认自动完成对应 Todo；来源重新打开时不会自动重开本地待办，网络失败也不会误完成。
 
 ![MayDolist GitHub 追踪](docs/screenshots/github-demo.png)
 
@@ -185,7 +185,7 @@ pnpm gen:types
 
 ## 项目状态
 
-当前版本：`1.3.5`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留）、快速收集（含日期前缀解析）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
+当前版本：`1.3.6`。核心 Todo（含到期日、提醒与周期任务）、便签、Focus（按到期状态分组）、GitHub 缓存追踪（含来源状态同步至关联 Todo、自动完成与本地决策保留、转入待办后从 GitHub 列表移交）、快速收集（含日期前缀解析）、Inbox 逐条处理模式（triage）、备份导入和 Windows 打包流程已实现。现行分层、模块路径与存储布局见 [docs/architecture.md](docs/architecture.md)；版本演进见 [CHANGELOG](CHANGELOG.md)。
 
 ## License
 
