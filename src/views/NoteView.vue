@@ -19,6 +19,7 @@ const status = ref("");
 const dirty = ref(false);
 const pendingDelete = ref(false);
 const floating = ref(false);
+const titleEditing = ref(false);
 let timer: number | undefined;
 let applyingRemote = false;
 
@@ -105,10 +106,21 @@ async function add() {
   choose(note.id);
 }
 
+function onTitleBlur() {
+  titleEditing.value = false;
+  if (!title.value.trim()) {
+    clearTimeout(timer);
+    void save();
+  }
+}
+
 async function save() {
-  if (!selectedId.value || applyingRemote) return;
+  const id = selectedId.value;
+  if (!id || applyingRemote) return;
+  const trimmedTitle = title.value.trim();
+  const persistTitle = trimmedTitle !== "" || !titleEditing.value;
   const snapshot = {
-    title: title.value || "未命名",
+    ...(persistTitle ? { title: trimmedTitle || "未命名" } : {}),
     content: content.value,
     tags: tagsText.value
       .split(/[,，]/)
@@ -118,9 +130,11 @@ async function save() {
   const tagsSnapshot = snapshot.tags.join(", ");
   status.value = "保存中…";
   try {
-    await store.update(selectedId.value, snapshot);
+    await store.update(id, snapshot);
+    if (selectedId.value !== id) return;
     if (
-      (title.value || "未命名") === snapshot.title &&
+      persistTitle &&
+      (title.value.trim() || "未命名") === snapshot.title &&
       content.value === snapshot.content &&
       tagsText.value
         .split(/[,，]/)
@@ -132,7 +146,7 @@ async function save() {
     }
     status.value = "已保存";
   } catch (error) {
-    status.value = String(error);
+    if (selectedId.value === id) status.value = String(error);
   }
 }
 
@@ -181,7 +195,7 @@ watch(
       ensureSelection();
       return;
     }
-    if (dirty.value || applyingRemote) return;
+    if (dirty.value || applyingRemote || titleEditing.value) return;
     const note = store.notes.find((value) => value.id === selectedId.value);
     if (!note) return;
     if (
@@ -243,7 +257,14 @@ watch(
         <p v-else class="muted">没有匹配的便签</p>
       </aside>
       <div v-if="selectedId && selectedNote" class="editor-pane">
-        <input v-model="title" class="input editor-title" aria-label="便签标题" />
+        <input
+          v-model="title"
+          class="input editor-title"
+          aria-label="便签标题"
+          placeholder="未命名"
+          @focus="titleEditing = true"
+          @blur="onTitleBlur"
+        />
         <input v-model="tagsText" class="input" placeholder="标签，以逗号分隔" />
         <textarea v-model="content" class="input editor-content" placeholder="记录内容…"></textarea>
         <ConfirmBar

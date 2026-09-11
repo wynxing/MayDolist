@@ -12,6 +12,7 @@ const note = ref<any>(null);
 const contentInput = ref<HTMLTextAreaElement | null>(null);
 const status = ref("");
 const loadError = ref("");
+const titleEditing = ref(false);
 let timer: number | undefined;
 let saveSeq = 0;
 let hydrated = false;
@@ -57,11 +58,22 @@ watch(
   }
 );
 
+function onTitleBlur() {
+  titleEditing.value = false;
+  if (!String(note.value?.title ?? "").trim()) {
+    clearTimeout(timer);
+    timer = undefined;
+    void save();
+  }
+}
+
 async function save() {
   if (!note.value) return;
   const seq = ++saveSeq;
+  const trimmedTitle = String(note.value.title ?? "").trim();
+  const persistTitle = trimmedTitle !== "" || !titleEditing.value;
   const snapshot = {
-    title: String(note.value.title ?? "").trim() || "未命名",
+    ...(persistTitle ? { title: trimmedTitle || "未命名" } : {}),
     content: note.value.content,
     collapsed: note.value.collapsed,
     alwaysOnTop: note.value.alwaysOnTop,
@@ -83,6 +95,7 @@ async function save() {
 }
 
 async function flushSave() {
+  titleEditing.value = false;
   clearTimeout(timer);
   timer = undefined;
   if (note.value) await save();
@@ -90,6 +103,7 @@ async function flushSave() {
 }
 
 onBeforeUnmount(() => {
+  titleEditing.value = false;
   clearTimeout(timer);
   timer = undefined;
   if (hydrated && note.value) void save();
@@ -141,7 +155,14 @@ async function toggleAlwaysOnTop() {
   >
     <div class="window-drag" data-tauri-drag-region aria-hidden="true"></div>
     <header>
-      <input v-model="note.title" class="floating-title" aria-label="便签标题" />
+      <input
+        v-model="note.title"
+        class="floating-title"
+        aria-label="便签标题"
+        placeholder="未命名"
+        @focus="titleEditing = true"
+        @blur="onTitleBlur"
+      />
       <button :aria-label="note.collapsed ? '展开便签' : '收起便签'" @click="toggle">
         {{ note.collapsed ? "▾" : "▴" }}
       </button>
