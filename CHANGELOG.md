@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.8
+
+- Discard blank floating notes on close so unused `/note` scratches do not stay in the list.
+- Keep an empty title in the editor instead of snapping back to 未命名 while typing.
+
 ## 1.3.7
 
 - Replace the default Tauri icon with the glass stacked-layers app icon.
