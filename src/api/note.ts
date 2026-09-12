@@ -7,4 +7,4 @@ export const create = (title: string, content = "") =>
 export const update = (id: string, patch: NotePatch) => call<Note>("note_update", { id, patch });
 export const remove = (id: string) => call<void>("note_soft_delete", { id });
 export const float = (id: string) => call<Note>("note_show_floating", { id });
-export const dock = (id: string) => call<Note>("note_dock", { id });
+export const dock = (id: string) => call<Note | null>("note_dock", { id });

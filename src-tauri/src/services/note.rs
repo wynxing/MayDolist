@@ -163,6 +163,27 @@ impl NoteService {
         self.save(&note)?;
         Ok(note)
     }
+    pub fn dock(&self, id: &str) -> AppResult<Option<Note>> {
+        let note = self.get(id)?;
+        if is_blank_note(&note) {
+            self.update(
+                id,
+                NotePatch {
+                    deleted: Some(true),
+                    floating: Some(false),
+                    ..Default::default()
+                },
+            )?;
+            return Ok(None);
+        }
+        Ok(Some(self.update(
+            id,
+            NotePatch {
+                floating: Some(false),
+                ..Default::default()
+            },
+        )?))
+    }
     pub fn permanent_delete(&self, id: &str) -> AppResult<()> {
         let _guard = self
             .write_lock
@@ -177,6 +198,11 @@ impl NoteService {
         self.invalidate_cache();
         Ok(())
     }
+}
+
+fn is_blank_note(note: &Note) -> bool {
+    let title = note.title.trim();
+    note.content.trim().is_empty() && (title.is_empty() || title == "新便签" || title == "未命名")
 }
 
 #[cfg(test)]
@@ -248,5 +274,98 @@ mod tests {
             final_note.window_bounds.is_some(),
             "window_bounds lost to content RMW"
         );
+    }
+
+    fn float(service: &NoteService, id: &str) {
+        service
+            .update(
+                id,
+                NotePatch {
+                    floating: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn dock_discards_placeholder_title_without_content() {
+        let (_tmp, service) = temp_service("dock-blank");
+        let note = service.create("新便签".into(), "".into()).unwrap();
+        float(&service, &note.id);
+
+        assert!(service.dock(&note.id).unwrap().is_none());
+        let stored = service.get(&note.id).unwrap();
+        assert!(stored.deleted);
+        assert!(!stored.floating);
+        assert!(service.list(false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn dock_discards_unnamed_title_without_content() {
+        let (_tmp, service) = temp_service("dock-unnamed");
+        let note = service.create("未命名".into(), "".into()).unwrap();
+        float(&service, &note.id);
+
+        assert!(service.dock(&note.id).unwrap().is_none());
+        assert!(service.get(&note.id).unwrap().deleted);
+    }
+
+    #[test]
+    fn dock_keeps_custom_title_without_content() {
+        let (_tmp, service) = temp_service("dock-title");
+        let note = service.create("想法".into(), "".into()).unwrap();
+        float(&service, &note.id);
+
+        let kept = service.dock(&note.id).unwrap().unwrap();
+        assert!(!kept.deleted);
+        assert!(!kept.floating);
+        assert_eq!(kept.title, "想法");
+        assert_eq!(service.list(false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dock_keeps_placeholder_title_with_content() {
+        let (_tmp, service) = temp_service("dock-body");
+        let note = service.create("新便签".into(), "写点东西".into()).unwrap();
+        float(&service, &note.id);
+
+        let kept = service.dock(&note.id).unwrap().unwrap();
+        assert!(!kept.deleted);
+        assert!(!kept.floating);
+        assert_eq!(kept.content, "写点东西");
+    }
+
+    #[test]
+    fn dock_discards_whitespace_only_content() {
+        let (_tmp, service) = temp_service("dock-ws");
+        let note = service.create("新便签".into(), "  \n\t  ".into()).unwrap();
+        float(&service, &note.id);
+
+        assert!(service.dock(&note.id).unwrap().is_none());
+        assert!(service.get(&note.id).unwrap().deleted);
+    }
+
+    #[test]
+    fn dock_discards_blank_note_with_only_chrome_changes() {
+        let (_tmp, service) = temp_service("dock-chrome");
+        let note = service.create("新便签".into(), "".into()).unwrap();
+        service
+            .update(
+                &note.id,
+                NotePatch {
+                    floating: Some(true),
+                    color: Some("yellow".into()),
+                    pinned: Some(true),
+                    always_on_top: Some(false),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert!(service.dock(&note.id).unwrap().is_none());
+        let stored = service.get(&note.id).unwrap();
+        assert!(stored.deleted);
+        assert!(!stored.floating);
     }
 }

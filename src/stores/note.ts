@@ -67,7 +67,8 @@ export const useNoteStore = defineStore("note", () => {
     },
     dock: async (id: string) => {
       const v = await api.dock(id);
-      upsert(v);
+      if (v) upsert(v);
+      else notes.value = notes.value.filter((n) => n.id !== id);
       return v;
     },
   };

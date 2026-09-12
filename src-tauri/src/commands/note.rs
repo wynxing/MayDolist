@@ -69,19 +69,24 @@ pub async fn note_show_floating(
     Ok(v)
 }
 #[tauri::command]
-pub async fn note_dock(state: State<'_, AppState>, app: AppHandle, id: String) -> AppResult<Note> {
+pub async fn note_dock(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+) -> AppResult<Option<Note>> {
     if let Some(w) = app.get_webview_window(&format!("note-{id}")) {
         w.close().ok();
     }
-    let v = state.services.note.update(
-        &id,
-        NotePatch {
-            floating: Some(false),
-            ..Default::default()
-        },
-    )?;
-    emit_entity_changed(&app, "note", &id, "docked")?;
-    Ok(v)
+    match state.services.note.dock(&id)? {
+        Some(v) => {
+            emit_entity_changed(&app, "note", &id, "docked")?;
+            Ok(Some(v))
+        }
+        None => {
+            emit_entity_changed(&app, "note", &id, "deleted")?;
+            Ok(None)
+        }
+    }
 }
 #[tauri::command]
 pub fn note_update_window_state(
