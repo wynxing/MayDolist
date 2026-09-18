@@ -22,6 +22,8 @@ const floating = ref(false);
 const titleEditing = ref(false);
 let timer: number | undefined;
 let applyingRemote = false;
+let saveSeq = 0;
+let savePromise: Promise<void> | null = null;
 
 const shown = computed(() =>
   store.notes.filter((note) => {
@@ -56,14 +58,14 @@ onMounted(async () => {
 
 function selectPending(id: string) {
   if (store.notes.some((note) => note.id === id)) {
-    choose(id);
+    void choose(id);
     return;
   }
   const stop = watch(
     () => store.notes,
     (notes) => {
       if (notes.some((note) => note.id === id)) {
-        choose(id);
+        void choose(id);
         stop();
       }
     },
@@ -74,7 +76,7 @@ function selectPending(id: string) {
 function ensureSelection() {
   if (selectedId.value && store.notes.some((note) => note.id === selectedId.value)) return;
   const next = shown.value[0] ?? store.notes[0];
-  if (next) choose(next.id);
+  if (next) void choose(next.id);
   else selectedId.value = null;
 }
 
@@ -89,7 +91,17 @@ async function applyNote(note: { title: string; content: string; tags: string[] 
   applyingRemote = false;
 }
 
-function choose(id: string) {
+async function choose(id: string) {
+  if (id === selectedId.value) return;
+  titleEditing.value = false;
+  clearTimeout(timer);
+  timer = undefined;
+  const previousId = selectedId.value;
+  if (savePromise) await savePromise;
+  if (dirty.value && previousId && store.notes.some((note) => note.id === previousId)) {
+    await save();
+    if (dirty.value) return;
+  }
   selectedId.value = id;
   pendingDelete.value = false;
   const note = store.notes.find((value) => value.id === id);
@@ -102,14 +114,19 @@ function preview(text: string) {
 }
 
 async function add() {
-  const note = await store.create("新便签");
-  choose(note.id);
+  try {
+    const note = await store.create("新便签");
+    await choose(note.id);
+  } catch (error) {
+    status.value = String(error);
+  }
 }
 
 function onTitleBlur() {
   titleEditing.value = false;
   if (!title.value.trim()) {
     clearTimeout(timer);
+    timer = undefined;
     void save();
   }
 }
@@ -117,6 +134,7 @@ function onTitleBlur() {
 async function save() {
   const id = selectedId.value;
   if (!id || applyingRemote) return;
+  const seq = ++saveSeq;
   const trimmedTitle = title.value.trim();
   const persistTitle = trimmedTitle !== "" || !titleEditing.value;
   const snapshot = {
@@ -129,30 +147,52 @@ async function save() {
   };
   const tagsSnapshot = snapshot.tags.join(", ");
   status.value = "保存中…";
-  try {
-    await store.update(id, snapshot);
-    if (selectedId.value !== id) return;
-    if (
-      persistTitle &&
-      (title.value.trim() || "未命名") === snapshot.title &&
-      content.value === snapshot.content &&
-      tagsText.value
-        .split(/[,，]/)
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .join(", ") === tagsSnapshot
-    ) {
-      dirty.value = false;
+  const previous = savePromise;
+  const run = (async () => {
+    if (previous) await previous;
+    if (seq !== saveSeq) return;
+    try {
+      await store.update(id, snapshot);
+      if (seq !== saveSeq) return;
+      if (selectedId.value !== id) return;
+      if (
+        persistTitle &&
+        (title.value.trim() || "未命名") === snapshot.title &&
+        content.value === snapshot.content &&
+        tagsText.value
+          .split(/[,，]/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .join(", ") === tagsSnapshot
+      ) {
+        dirty.value = false;
+      }
+      status.value = "已保存";
+    } catch (error) {
+      if (seq === saveSeq && selectedId.value === id) status.value = String(error);
     }
-    status.value = "已保存";
-  } catch (error) {
-    if (selectedId.value === id) status.value = String(error);
-  }
+  })();
+  savePromise = run;
+  await run;
+  if (savePromise === run) savePromise = null;
 }
 
 async function setColor(color: string) {
   if (!selectedId.value) return;
-  await store.update(selectedId.value, { color });
+  try {
+    await store.update(selectedId.value, { color });
+  } catch (error) {
+    status.value = String(error);
+  }
+}
+
+async function togglePin() {
+  if (!selectedId.value || !selectedNote.value) return;
+  try {
+    await store.update(selectedId.value, { pinned: !selectedNote.value.pinned });
+  } catch (error) {
+    status.value = String(error);
+  }
 }
 
 async function floatSelected() {
@@ -171,17 +211,23 @@ async function floatSelected() {
 
 async function confirmDelete() {
   if (!selectedId.value) return;
-  await store.remove(selectedId.value);
-  selectedId.value = null;
-  pendingDelete.value = false;
-  ensureSelection();
+  try {
+    await store.remove(selectedId.value);
+    selectedId.value = null;
+    pendingDelete.value = false;
+    ensureSelection();
+  } catch (error) {
+    status.value = String(error);
+  }
 }
 
 watch([title, content, tagsText], () => {
   if (applyingRemote || !selectedId.value) return;
   dirty.value = true;
   clearTimeout(timer);
-  timer = window.setTimeout(save, 500);
+  timer = window.setTimeout(() => {
+    void save();
+  }, 500);
 });
 
 watch(allTags, (tags) => {
@@ -223,8 +269,12 @@ watch(
       </template>
     </PageHeader>
 
+    <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
+    <p v-if="store.loading && !store.notes.length" class="focus-loading" role="status">
+      正在加载便签…
+    </p>
     <EmptyState
-      v-if="!store.notes.length"
+      v-else-if="!store.notes.length"
       title="还没有便签"
       text="先新建一条，需要时再拖到桌面。"
     />
@@ -245,7 +295,7 @@ watch(
             :class="{ active: selectedId === note.id }"
             :data-color="noteColorId(note.color)"
             :aria-selected="selectedId === note.id"
-            @click="choose(note.id)"
+            @click="void choose(note.id)"
           >
             <span class="select-title"> <PinMark :on="note.pinned" />{{ note.title }} </span>
             <small v-if="note.tags.length" class="select-meta">{{ note.tags.join(" · ") }}</small>
@@ -295,11 +345,7 @@ watch(
               @click="setColor(color.id)"
             />
           </div>
-          <button
-            class="btn"
-            type="button"
-            @click="store.update(selectedId, { pinned: !selectedNote.pinned })"
-          >
+          <button class="btn" type="button" @click="togglePin">
             {{ selectedNote.pinned ? "取消置顶" : "置顶" }}
           </button>
           <button class="btn" type="button" :disabled="floating" @click="floatSelected">

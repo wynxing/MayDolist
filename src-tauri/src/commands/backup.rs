@@ -46,10 +46,11 @@ pub fn backup_import(
                     info.path, info.backup_path
                 ),
             );
+            state.services.todo.invalidate_cache();
+            state.services.note.invalidate_cache();
             emit_entity_changed(&app, "todo", "*", "imported")?;
             emit_entity_changed(&app, "note", "*", "imported")?;
             emit_entity_changed(&app, "github", "*", "imported")?;
-            state.services.todo.invalidate_cache();
             let config = state.storage.load_config()?;
             app.emit("settings-changed", config.clone())
                 .map_err(|e| AppError::Internal(e.to_string()))?;

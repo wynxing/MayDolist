@@ -79,8 +79,13 @@ function toggleItemDetails(listId: string, item: TodoItem) {
 async function addList() {
   const title = newList.value.trim();
   if (!title) return;
-  await store.createList(title);
-  newList.value = "";
+  actionError.value = "";
+  try {
+    await store.createList(title);
+    newList.value = "";
+  } catch (err) {
+    actionError.value = String(err);
+  }
 }
 
 function findItem(itemId: string) {
@@ -126,12 +131,17 @@ async function confirmPending() {
   const pending = pendingConfirm.value;
   if (!pending) return;
   pendingConfirm.value = null;
-  if (pending.kind === "list") {
-    await store.updateList(pending.id, { deleted: true });
-    return;
+  actionError.value = "";
+  try {
+    if (pending.kind === "list") {
+      await store.updateList(pending.id, { deleted: true });
+      return;
+    }
+    await store.softDelete(pending.id);
+    closeItemDetails(pending.id);
+  } catch (err) {
+    actionError.value = String(err);
   }
-  await store.softDelete(pending.id);
-  closeItemDetails(pending.id);
 }
 
 async function toggleItemCompleted(item: TodoItem) {
@@ -325,7 +335,8 @@ function onItemDragEnd() {
     <TriageMode v-if="triageActive" @exit="triageActive = false" />
 
     <template v-else>
-      <div v-if="hasLists" class="todo-groups">
+      <p v-if="store.loading && !hasLists" class="focus-loading" role="status">正在加载待办…</p>
+      <div v-else-if="hasLists" class="todo-groups">
         <TodoListCard
           v-for="(list, listIndex) in store.lists"
           :key="list.id"
@@ -384,7 +395,11 @@ function onItemDragEnd() {
         </TodoListCard>
       </div>
 
-      <EmptyState v-else title="还没有清单" text="先新建一个，把第一件事记下来。" />
+      <EmptyState
+        v-else-if="!store.loading"
+        title="还没有清单"
+        text="先新建一个，把第一件事记下来。"
+      />
     </template>
   </section>
 </template>

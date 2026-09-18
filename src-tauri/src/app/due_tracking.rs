@@ -2,14 +2,25 @@
 //! (reminders + tray badge).
 
 use crate::AppState;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::badge::update_tray_badge;
 use super::windows::show_main;
 
+fn github_refresh_due(elapsed: Option<Duration>, interval_minutes: u32) -> bool {
+    if interval_minutes == 0 {
+        return false;
+    }
+    match elapsed {
+        None => true,
+        Some(elapsed) => elapsed >= Duration::from_secs(u64::from(interval_minutes) * 60),
+    }
+}
+
 pub(super) fn spawn_github_refresh(app: AppHandle) {
     std::thread::spawn(move || {
+        let mut last_refresh: Option<Instant> = None;
         let mut first_run = true;
         loop {
             if !first_run {
@@ -26,52 +37,48 @@ pub(super) fn spawn_github_refresh(app: AppHandle) {
                     continue;
                 }
             };
-            if config.github_refresh_interval_minutes == 0 {
+            if !github_refresh_due(
+                last_refresh.map(|at| at.elapsed()),
+                config.github_refresh_interval_minutes,
+            ) {
                 continue;
             }
-            let minute = chrono::Utc::now().timestamp() / 60;
-            if minute % i64::from(config.github_refresh_interval_minutes) == 0 {
-                match state.services.github.refresh_all() {
-                    Ok(_) => {
-                        if config.github_sync_enabled {
-                            let summary = state.services.github.sync_linked_todos(
-                                &state.services.todo,
-                                config.github_auto_complete_todos,
-                            );
-                            for id in &summary.changed_item_ids {
-                                let operation = if summary.auto_completed_item_ids.contains(id) {
-                                    "auto-completed"
-                                } else {
-                                    "source-state-changed"
-                                };
-                                crate::events::emit_entity_changed(&app, "todoItem", id, operation)
-                                    .ok();
-                            }
-                            crate::events::emit_entity_changed(
-                                &app,
-                                "github",
-                                "*",
-                                if summary.failed > 0 {
-                                    "sync-failed"
-                                } else {
-                                    "status-synced"
-                                },
-                            )
-                            .ok();
+            match state.services.github.refresh_all() {
+                Ok(_) => {
+                    last_refresh = Some(Instant::now());
+                    if config.github_sync_enabled {
+                        let summary = state.services.github.sync_linked_todos(
+                            &state.services.todo,
+                            config.github_auto_complete_todos,
+                        );
+                        for id in &summary.changed_item_ids {
+                            let operation = if summary.auto_completed_item_ids.contains(id) {
+                                "auto-completed"
+                            } else {
+                                "source-state-changed"
+                            };
+                            crate::events::emit_entity_changed(&app, "todoItem", id, operation)
+                                .ok();
                         }
                         crate::events::emit_entity_changed(
                             &app,
                             "github",
                             "*",
-                            "background-refreshed",
+                            if summary.failed > 0 {
+                                "sync-failed"
+                            } else {
+                                "status-synced"
+                            },
                         )
                         .ok();
                     }
-                    Err(err) => {
-                        state
-                            .log
-                            .log("error", &format!("background github refresh failed: {err}"));
-                    }
+                    crate::events::emit_entity_changed(&app, "github", "*", "background-refreshed")
+                        .ok();
+                }
+                Err(err) => {
+                    state
+                        .log
+                        .log("error", &format!("background github refresh failed: {err}"));
                 }
             }
         }
@@ -209,4 +216,27 @@ fn show_reminder(app: &AppHandle, due: &crate::services::reminder::DueReminder) 
         "info",
         &format!("reminder due (toast unavailable): {}", due.id),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_due_on_first_run() {
+        assert!(github_refresh_due(None, 30));
+    }
+
+    #[test]
+    fn refresh_skipped_when_disabled() {
+        assert!(!github_refresh_due(None, 0));
+        assert!(!github_refresh_due(Some(Duration::from_secs(3_600)), 0));
+    }
+
+    #[test]
+    fn refresh_due_after_interval() {
+        assert!(!github_refresh_due(Some(Duration::from_secs(29 * 60)), 30));
+        assert!(github_refresh_due(Some(Duration::from_secs(30 * 60)), 30));
+        assert!(github_refresh_due(Some(Duration::from_secs(45 * 60)), 30));
+    }
 }

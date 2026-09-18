@@ -9,6 +9,7 @@ export const useGithubStore = defineStore("github", () => {
   const watchlist = ref<RepoWatch[]>([]);
   const snapshots = ref<RepoSnapshot[]>([]);
   const error = ref<string | null>(null);
+  const loading = ref(false);
   const lastSyncSummary = ref<GithubSyncSummary | null>(null);
 
   const replaceSnapshot = (snap: RepoSnapshot) => {
@@ -18,6 +19,7 @@ export const useGithubStore = defineStore("github", () => {
   };
 
   const load = async () => {
+    loading.value = true;
     try {
       // Single round trip: auth + watchlist + every snapshot.
       const result = await api.overview();
@@ -27,6 +29,8 @@ export const useGithubStore = defineStore("github", () => {
       error.value = null;
     } catch (e) {
       error.value = String(e);
+    } finally {
+      loading.value = false;
     }
   };
 
@@ -39,6 +43,7 @@ export const useGithubStore = defineStore("github", () => {
     watchlist,
     snapshots,
     error,
+    loading,
     init,
     refresh: async () => {
       const result = await api.refreshAll();

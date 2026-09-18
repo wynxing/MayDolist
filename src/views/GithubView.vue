@@ -27,6 +27,7 @@ const pinDrafts = reactive<Record<string, string>>({});
 const pinBusy = reactive<Record<string, boolean>>({});
 const pinErrors = reactive<Record<string, string | null>>({});
 const convertState = reactive<Record<string, { phase: "saving" | "error"; message: string }>>({});
+const actionError = ref("");
 
 const filters = [
   ["mine", "我的"],
@@ -142,9 +143,13 @@ function activeFilterSummary(watch: RepoWatch) {
 }
 
 async function add() {
-  if (repo.value) {
+  if (!repo.value) return;
+  actionError.value = "";
+  try {
     await s.addWatch(repo.value);
     repo.value = "";
+  } catch (err) {
+    actionError.value = String(err);
   }
 }
 
@@ -158,8 +163,11 @@ function focusRepoInput() {
 
 async function refresh() {
   busy.value = true;
+  actionError.value = "";
   try {
     await s.refresh();
+  } catch (err) {
+    actionError.value = String(err);
   } finally {
     busy.value = false;
   }
@@ -211,17 +219,32 @@ function formatTime(iso: string) {
 }
 
 async function ignorePr(repoName: string, pr: GhPullRequest) {
-  await s.ignoreItem(repoName, pr.number, "pr");
+  actionError.value = "";
+  try {
+    await s.ignoreItem(repoName, pr.number, "pr");
+  } catch (err) {
+    actionError.value = String(err);
+  }
 }
 
 async function ignoreIssue(repoName: string, issue: GhIssue) {
-  await s.ignoreItem(repoName, issue.number, "issue");
+  actionError.value = "";
+  try {
+    await s.ignoreItem(repoName, issue.number, "issue");
+  } catch (err) {
+    actionError.value = String(err);
+  }
 }
 
 async function confirmRemove() {
   if (!pendingRemove.value) return;
-  await s.removeWatch(pendingRemove.value);
-  pendingRemove.value = null;
+  actionError.value = "";
+  try {
+    await s.removeWatch(pendingRemove.value);
+    pendingRemove.value = null;
+  } catch (err) {
+    actionError.value = String(err);
+  }
 }
 
 function parsePinInput(raw: string): number | null {
@@ -351,9 +374,13 @@ function convertLabel(key: string) {
       />
     </div>
     <p v-if="s.error" class="error" role="alert">{{ s.error }}</p>
+    <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
 
+    <p v-if="s.loading && !s.watchlist.length" class="focus-loading" role="status">
+      正在加载 GitHub 追踪…
+    </p>
     <EmptyState
-      v-if="!s.watchlist.length"
+      v-else-if="!s.watchlist.length"
       title="还没有追踪仓库"
       text="先用 gh auth login 登录 GitHub CLI，再添加 owner/repo。离线时仍可查看本地缓存。"
       action-label="添加仓库"

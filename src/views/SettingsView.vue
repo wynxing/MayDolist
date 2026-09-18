@@ -19,6 +19,7 @@ type Trash = {
 const settings = useSettingsStore();
 const github = useGithubStore();
 const updater = useUpdateStore();
+const isMac = /Mac/i.test(navigator.userAgent);
 const target = ref("");
 const trash = ref<Trash | null>(null);
 const message = ref("");
@@ -55,7 +56,11 @@ const quietEnabled = computed(() => !!settings.config?.quietHours);
 onMounted(async () => {
   await settings.init();
   await updater.init();
-  trash.value = await call<Trash>("trash_list");
+  try {
+    trash.value = await call<Trash>("trash_list");
+  } catch (err) {
+    message.value = String(err);
+  }
   try {
     recentBackups.value = await backupApi.listBackups();
   } catch (err) {
@@ -194,10 +199,14 @@ function previewOpacity(key: "mainWindowGlassOpacity" | "floatingNoteGlassOpacit
 
 async function migrate() {
   if (!target.value) return;
-  const dataDir = await settings.migrate(target.value);
-  if (settings.config) settings.config.dataDir = dataDir;
-  target.value = "";
-  message.value = "数据目录已迁移";
+  try {
+    const dataDir = await settings.migrate(target.value);
+    if (settings.config) settings.config.dataDir = dataDir;
+    target.value = "";
+    message.value = "数据目录已迁移";
+  } catch (err) {
+    message.value = `迁移失败：${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 async function chooseTarget() {
@@ -207,8 +216,12 @@ async function chooseTarget() {
 }
 
 async function action(kind: string, id: string, command: string) {
-  await call(command, { kind, id });
-  trash.value = await call<Trash>("trash_list");
+  try {
+    await call(command, { kind, id });
+    trash.value = await call<Trash>("trash_list");
+  } catch (err) {
+    message.value = String(err);
+  }
 }
 
 async function permanentlyDelete(kind: string, id: string, title: string) {
@@ -241,12 +254,22 @@ async function runPendingConfirm() {
   const pending = pendingConfirm.value;
   if (!pending) return;
   pendingConfirm.value = null;
-  await pending.run();
+  try {
+    await pending.run();
+  } catch (err) {
+    const text = String(err);
+    if (pending.scope === "data") dataError.value = text;
+    else message.value = text;
+  }
 }
 </script>
 
 <template>
-  <section v-if="settings.config" class="settings glass-card">
+  <section v-if="!settings.config" class="settings glass-card">
+    <p v-if="settings.error" class="error" role="alert">{{ settings.error }}</p>
+    <p v-else class="focus-loading" role="status">正在加载设置…</p>
+  </section>
+  <section v-else class="settings glass-card">
     <header class="settings-header">
       <div>
         <h2>设置</h2>
@@ -269,7 +292,10 @@ async function runPendingConfirm() {
         </label>
 
         <label class="settings-row">
-          <span>热角</span>
+          <span>
+            热角
+            <small v-if="isMac">可能与系统热角冲突</small>
+          </span>
           <select v-model="settings.config.hotCorner" class="input settings-control">
             <option value="off">关闭</option>
             <option value="top-left">左上</option>
@@ -297,9 +323,16 @@ async function runPendingConfirm() {
           <span>快速收集</span>
           <label class="settings-switch">
             <input v-model="settings.config.quickCaptureEnabled" type="checkbox" />
-            <span>启用快速收集窗口（默认 Ctrl+Alt+Space）</span>
+            <span
+              >启用快速收集窗口（默认
+              {{ isMac ? "Command+Option+Space" : "Ctrl+Alt+Space" }}）</span
+            >
           </label>
         </div>
+
+        <p v-if="isMac" class="settings-note">
+          全局快捷键需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许 MayDolist。
+        </p>
 
         <div class="settings-row">
           <span>
@@ -420,12 +453,8 @@ async function runPendingConfirm() {
         <div class="settings-row">
           <span>开机自启</span>
           <label class="settings-switch">
-            <input
-              v-model="settings.config.autostart"
-              type="checkbox"
-              @change="settings.setAutostart(settings.config!.autostart)"
-            />
-            <span>启动 Windows 时运行</span>
+            <input v-model="settings.config.autostart" type="checkbox" />
+            <span>开机时运行</span>
           </label>
         </div>
       </div>

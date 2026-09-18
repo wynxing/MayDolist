@@ -43,6 +43,16 @@ fn sanitize_config(mut config: AppConfig) -> AppConfig {
     config
 }
 
+fn apply_autostart(app: &AppHandle, enabled: bool) -> AppResult<()> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| AppError::Internal(e.to_string()))
+}
+
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> AppResult<AppConfig> {
     state.storage.load_config()
@@ -57,6 +67,7 @@ pub fn settings_update(
     validate_glass_opacity(&config)?;
     validate_triage_later_days(&config)?;
     crate::app::apply_hotkeys(&app, &config)?;
+    apply_autostart(&app, config.autostart)?;
     state.storage.save_config(&config)?;
     app.emit("settings-changed", config.clone())
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -66,28 +77,12 @@ pub fn settings_update(
 pub fn settings_migrate_data_dir(state: State<'_, AppState>, target: String) -> AppResult<String> {
     let target = PathBuf::from(target);
     state.storage.migrate(&target)?;
+    state.services.todo.invalidate_cache();
+    state.services.note.invalidate_cache();
     let mut config = state.storage.load_config()?;
     config.data_dir = target.display().to_string();
     state.storage.save_config(&config)?;
     Ok(config.data_dir)
-}
-#[tauri::command]
-pub fn settings_set_autostart(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    enabled: bool,
-) -> AppResult<bool> {
-    let manager = app.autolaunch();
-    if enabled {
-        manager.enable()
-    } else {
-        manager.disable()
-    }
-    .map_err(|e| AppError::Internal(e.to_string()))?;
-    let mut config = state.storage.load_config()?;
-    config.autostart = enabled;
-    state.storage.save_config(&config)?;
-    Ok(enabled)
 }
 
 #[cfg(test)]

@@ -13,17 +13,20 @@ function sortNotes(notes: Note[]): Note[] {
 export const useNoteStore = defineStore("note", () => {
   const notes = ref<Note[]>([]);
   const error = ref<string | null>(null);
+  const loading = ref(false);
   let inFlight: Promise<void> | null = null;
 
   const refresh = async () => {
     if (inFlight) return inFlight;
     inFlight = (async () => {
+      loading.value = true;
       try {
         notes.value = await api.list();
         error.value = null;
       } catch (e) {
         error.value = String(e);
       } finally {
+        loading.value = false;
         inFlight = null;
       }
     })();
@@ -44,6 +47,7 @@ export const useNoteStore = defineStore("note", () => {
   return {
     notes,
     error,
+    loading,
     init,
     refresh,
     create: async (t: string, c = "") => {

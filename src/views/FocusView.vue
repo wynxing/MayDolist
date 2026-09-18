@@ -95,7 +95,6 @@ async function runAction(action: () => Promise<unknown>) {
 function completeTodo(item: FocusTodo) {
   void runAction(async () => {
     await todo.toggleItem(item.id, false);
-    void focus.refresh();
   });
 }
 

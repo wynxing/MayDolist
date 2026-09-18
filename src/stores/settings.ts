@@ -113,6 +113,5 @@ export const useSettingsStore = defineStore("settings", () => {
     previewGlass,
     isFloatingWindow,
     migrate: api.migrate,
-    setAutostart: api.autostart,
   };
 });

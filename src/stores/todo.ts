@@ -15,17 +15,20 @@ function sortItems(items: TodoItem[]): TodoItem[] {
 export const useTodoStore = defineStore("todo", () => {
   const lists = ref<TodoList[]>([]);
   const error = ref<string | null>(null);
+  const loading = ref(false);
   let inFlight: Promise<void> | null = null;
 
   const refresh = async () => {
     if (inFlight) return inFlight;
     inFlight = (async () => {
+      loading.value = true;
       try {
         lists.value = await api.list();
         error.value = null;
       } catch (e) {
         error.value = String(e);
       } finally {
+        loading.value = false;
         inFlight = null;
       }
     })();
@@ -54,6 +57,7 @@ export const useTodoStore = defineStore("todo", () => {
   return {
     lists,
     error,
+    loading,
     init,
     refresh,
     createList: async (t: string) => {

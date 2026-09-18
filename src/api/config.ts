@@ -3,4 +3,3 @@ import { call } from "./index";
 export const get = () => call<AppConfig>("settings_get");
 export const update = (config: AppConfig) => call<AppConfig>("settings_update", { config });
 export const migrate = (target: string) => call<string>("settings_migrate_data_dir", { target });
-export const autostart = (enabled: boolean) => call<boolean>("settings_set_autostart", { enabled });
