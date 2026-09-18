@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.9
+
+- Flush and serialize note autosaves so switching notes cannot write one note's edits onto another.
+- Invalidate todo and note caches before import/migrate events so the UI does not keep stale lists.
+- Refresh GitHub on a real elapsed interval instead of UTC minute alignment, including a first-run fetch.
+- Remove unused config IPC; persist autostart with Apply; show loading and action errors on core views.
+
 ## 1.3.8
 
 - Discard blank floating notes on close so unused `/note` scratches do not stay in the list.
