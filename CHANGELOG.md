@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.10
+
+- Tighten the GitHub view so tracked PRs and issues are easier to scan: login status and search sit with the header, repo times stay on a second line, and each item is one row.
+
 ## 1.3.9
 
 - Flush and serialize note autosaves so switching notes cannot write one note's edits onto another.
