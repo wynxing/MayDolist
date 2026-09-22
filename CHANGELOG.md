@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.11
+
+- Ship an unsigned macOS app: ad-hoc signature, Command+Option shortcuts, HUD window effect, Documents data directory, and Homebrew `gh` lookup. macOS builds skip in-app updates and only refresh the menu-bar badge.
+- Make GitHub filtering explicit: every word must match, a repository name selects that repo, and `#number` matches one item.
+
 ## 1.3.10
 
 - Tighten the GitHub view so tracked PRs and issues are easier to scan: login status and search sit with the header, repo times stay on a second line, and each item is one row.
