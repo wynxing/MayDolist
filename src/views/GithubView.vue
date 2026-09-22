@@ -5,6 +5,7 @@ import EmptyState from "../components/EmptyState.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { useGithubStore } from "../stores/github";
 import { useTodoStore } from "../stores/todo";
+import { matchesGithubItem, repoMatchesQuery } from "../githubFilter";
 import { SIGNAL_FILTER_OPTIONS, signalBadges } from "../signals";
 import type {
   ActionSignal,
@@ -80,7 +81,7 @@ function visiblePrs(watch: RepoWatch) {
       !ignored.has(pr.number) &&
       !isHandedOff(watch.fullName, pr.number) &&
       passesSignalFilter(watch, pr.signals) &&
-      matchesText(watch, pr.title)
+      matchesText(watch, pr.title, pr.number)
   );
 }
 
@@ -95,7 +96,7 @@ function visibleIssues(watch: RepoWatch) {
       !ignored.has(issue.number) &&
       !isHandedOff(watch.fullName, issue.number) &&
       passesSignalFilter(watch, issue.signals) &&
-      matchesText(watch, issue.title)
+      matchesText(watch, issue.title, issue.number)
   );
 }
 
@@ -105,13 +106,31 @@ function passesSignalFilter(watch: RepoWatch, signals: ActionSignal[]) {
   return active.some((signal) => signals.includes(signal));
 }
 
-// 纯前端文本过滤：只作用于已加载快照，不发请求、不改 watchlist。
+// 只过滤已加载快照，不发请求、不改 watchlist。
 const normalizedQuery = computed(() => textQuery.value.trim().toLowerCase());
+const repoNames = computed(() => s.watchlist.map((watch) => watch.fullName));
 
-function matchesText(watch: RepoWatch, title: string) {
-  const query = normalizedQuery.value;
-  if (!query) return true;
-  return title.toLowerCase().includes(query) || watch.fullName.toLowerCase().includes(query);
+function matchesText(watch: RepoWatch, title: string, number: number) {
+  return matchesGithubItem(normalizedQuery.value, repoNames.value, watch.fullName, title, number);
+}
+
+function listed(watch: RepoWatch) {
+  if (!normalizedQuery.value) return true;
+  if (visiblePrs(watch).length || visibleIssues(watch).length) return true;
+  return repoMatchesQuery(normalizedQuery.value, repoNames.value, watch.fullName);
+}
+
+const visibleWatches = computed(() => s.watchlist.filter((watch) => listed(watch)));
+
+const matchCount = computed(() =>
+  visibleWatches.value.reduce(
+    (sum, watch) => sum + visiblePrs(watch).length + visibleIssues(watch).length,
+    0
+  )
+);
+
+function isCollapsed(watch: RepoWatch) {
+  return watch.collapsed && !normalizedQuery.value;
 }
 
 function summary(watch: RepoWatch) {
@@ -120,7 +139,7 @@ function summary(watch: RepoWatch) {
   const parts: string[] = [];
   if (prs) parts.push(`${prs} PR`);
   if (issues) parts.push(`${issues} Issue`);
-  if (!parts.length) return "无条目";
+  if (!parts.length) return normalizedQuery.value ? "无匹配" : "无条目";
   return parts.join(" · ");
 }
 
@@ -382,10 +401,16 @@ function convertLabel(key: string) {
         v-model="textQuery"
         class="input gh-search-input"
         type="search"
-        placeholder="按标题 / 仓库名过滤"
-        aria-label="按标题或仓库名过滤"
+        placeholder="标题、仓库名或 #编号"
+        aria-label="按标题、仓库名或编号过滤"
+        aria-describedby="gh-search-hint"
       />
     </div>
+    <p v-if="s.watchlist.length" id="gh-search-hint" class="gh-search-hint">
+      <span v-if="normalizedQuery" class="gh-search-count">{{ matchCount }} 条匹配。</span>
+      只过滤已加载条目。不区分大小写，空格表示都要包含。标题如 fix login；仓库如 MayDolist 或
+      wynxing/may；编号如 #128。
+    </p>
     <p v-if="s.error" class="error" role="alert">{{ s.error }}</p>
     <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
 
@@ -400,20 +425,28 @@ function convertLabel(key: string) {
       @action="focusRepoInput"
     />
 
+    <EmptyState
+      v-else-if="normalizedQuery && !visibleWatches.length"
+      title="没有匹配的条目"
+      text="试试标题里的词、仓库名（MayDolist 或 owner/repo），或 #编号。这里只查已经加载的 PR 与 Issue。"
+      action-label="清除过滤"
+      @action="textQuery = ''"
+    />
+
     <article
-      v-for="watch in s.watchlist"
+      v-for="watch in visibleWatches"
       :key="watch.fullName"
       class="snapshot"
-      :class="{ collapsed: watch.collapsed }"
+      :class="{ collapsed: isCollapsed(watch) }"
     >
       <header class="snapshot-header">
         <button
           type="button"
           class="gh-accordion-toggle"
-          :aria-expanded="!watch.collapsed"
+          :aria-expanded="!isCollapsed(watch)"
           @click="toggleCollapsed(watch)"
         >
-          <span class="gh-chevron" aria-hidden="true">{{ watch.collapsed ? "▸" : "▾" }}</span>
+          <span class="gh-chevron" aria-hidden="true">{{ isCollapsed(watch) ? "▸" : "▾" }}</span>
           <h3 class="gh-repo-name">{{ watch.fullName }}</h3>
           <span class="gh-counts">{{ summary(watch) }}</span>
         </button>
@@ -430,7 +463,7 @@ function convertLabel(key: string) {
           移除
         </button>
       </header>
-      <p v-if="!watch.collapsed && snapshotMeta(watch)" class="snapshot-time">
+      <p v-if="!isCollapsed(watch) && snapshotMeta(watch)" class="snapshot-time">
         {{ snapshotMeta(watch) }}
       </p>
       <ConfirmBar
@@ -442,7 +475,7 @@ function convertLabel(key: string) {
         @cancel="pendingRemove = null"
       />
 
-      <template v-if="!watch.collapsed">
+      <template v-if="!isCollapsed(watch)">
         <div class="gh-filters">
           <div class="gh-filters-bar">
             <button

@@ -1926,6 +1926,17 @@ textarea.input {
   font-size: 12px;
 }
 
+.gh-search-hint {
+  margin: -4px 2px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.gh-search-count {
+  color: var(--text);
+}
+
 .gh-item-actions {
   display: flex;
   align-items: center;
