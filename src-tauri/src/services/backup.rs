@@ -216,25 +216,6 @@ impl BackupService {
         Ok(infos)
     }
 
-    /// Open the data directory in the system file manager.
-    pub fn open_data_dir(&self) -> AppResult<()> {
-        let dir = self.storage.data_dir();
-        #[cfg(windows)]
-        {
-            use std::process::Command;
-            Command::new("explorer")
-                .arg(&dir)
-                .spawn()
-                .map_err(|e| AppError::Internal(format!("failed to open data dir: {e}")))?;
-            Ok(())
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = dir;
-            Err(AppError::InvalidInput("打开数据目录仅支持 Windows".into()))
-        }
-    }
-
     fn backup_dir(&self) -> PathBuf {
         self.storage.data_dir().join(BACKUP_SUBDIR)
     }

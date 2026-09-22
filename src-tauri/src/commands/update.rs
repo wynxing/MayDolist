@@ -22,9 +22,12 @@ pub fn update_runtime_info(app: AppHandle) -> AppResult<UpdateRuntimeInfo> {
 
     Ok(UpdateRuntimeInfo {
         current_version: app.package_info().version.to_string(),
-        // The release workflow deliberately names the standalone binary with
-        // "portable". The updater must never replace that running executable.
-        portable: cfg!(debug_assertions) || file_name.contains("portable"),
+        // The updater must never replace a running unsigned macOS build or the
+        // Windows portable executable. Mac releases have no notarized updater
+        // payload; the UI only offers the GitHub Releases page.
+        portable: cfg!(debug_assertions)
+            || cfg!(target_os = "macos")
+            || file_name.contains("portable"),
         release_url: "https://github.com/wynxing/MayDolist/releases/latest".into(),
     })
 }

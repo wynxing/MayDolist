@@ -371,7 +371,7 @@ fn replace_file(source: &Path, target: &Path) -> AppResult<()> {
     fs::rename(source, target).map_err(Into::into)
 }
 
-/// Default data dir: `%USERPROFILE%\Documents\MayDolist`, overridable via
+/// Default data dir: `<Documents>/MayDolist`, overridable via
 /// `MAYDOLIST_DATA_DIR` (also used by tests).
 pub fn resolve_data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("MAYDOLIST_DATA_DIR") {
@@ -382,6 +382,9 @@ pub fn resolve_data_dir() -> PathBuf {
     }
     if let Some(path) = read_bootstrap() {
         return path;
+    }
+    if let Some(docs) = dirs::document_dir() {
+        return docs.join("MayDolist");
     }
     #[cfg(windows)]
     if let Ok(profile) = std::env::var("USERPROFILE") {
@@ -488,7 +491,7 @@ mod tests {
         let storage = Storage::with_dir(&dir).unwrap();
         let config = storage.load_config().unwrap();
         assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
-        assert_eq!(config.hotkey, "Ctrl+Alt+M");
+        assert_eq!(config.hotkey, AppConfig::default().hotkey);
         assert!(storage.config_path().exists());
         for sub in DEFAULT_SUBDIRECTORIES {
             assert!(dir.join(sub).is_dir(), "missing dir: {sub}");

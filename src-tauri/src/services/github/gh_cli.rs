@@ -11,8 +11,47 @@ use serde::Deserialize;
 use crate::error::{AppError, AppResult};
 use crate::models::{GhIssue, GhPullRequest};
 
+/// GUI apps on macOS inherit a minimal PATH. Prepend Homebrew locations so
+/// `gh` installed via brew is visible without a login shell.
+#[cfg(target_os = "macos")]
+fn prepare_macos_path() {
+    use std::path::PathBuf;
+    const EXTRAS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
+    let mut paths: Vec<PathBuf> =
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    for extra in EXTRAS.iter().rev() {
+        let extra = PathBuf::from(extra);
+        if extra.is_dir() && !paths.iter().any(|p| p == &extra) {
+            paths.insert(0, extra);
+        }
+    }
+    if let Ok(joined) = std::env::join_paths(paths) {
+        // SAFETY: PATH is only mutated for this process so GUI-launched `gh`
+        // lookups see Homebrew prefixes.
+        #[allow(unused_unsafe)]
+        unsafe {
+            std::env::set_var("PATH", joined);
+        }
+    }
+}
+
+fn gh_program() -> std::ffi::OsString {
+    #[cfg(target_os = "macos")]
+    {
+        use std::path::Path;
+        for candidate in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] {
+            if Path::new(candidate).is_file() {
+                return candidate.into();
+            }
+        }
+    }
+    "gh".into()
+}
+
 pub(super) fn run_gh(args: &[&str]) -> AppResult<String> {
-    let mut command = Command::new("gh");
+    #[cfg(target_os = "macos")]
+    prepare_macos_path();
+    let mut command = Command::new(gh_program());
     command
         .args(args)
         .stdout(std::process::Stdio::piped())
@@ -162,4 +201,29 @@ pub(super) struct CheckRuns {
 pub(super) struct CheckRun {
     #[serde(default)]
     pub(super) conclusion: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gh_program;
+
+    #[test]
+    fn gh_program_falls_back_to_path_lookup() {
+        let program = gh_program();
+        #[cfg(target_os = "macos")]
+        {
+            let value = program.to_string_lossy();
+            assert!(
+                value == "gh"
+                    || value.ends_with("/gh")
+                    || value.ends_with("\\gh")
+                    || value.ends_with("/gh.exe"),
+                "unexpected gh program: {value}"
+            );
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(program, "gh");
+        }
+    }
 }

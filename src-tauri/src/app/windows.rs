@@ -307,13 +307,20 @@ pub fn show_note(app: &AppHandle, note: &Note, focus_body: bool) -> AppResult<()
 }
 
 fn acrylic_effects() -> tauri::utils::config::WindowEffectsConfig {
-    EffectsBuilder::new().effect(Effect::Acrylic).build()
+    #[cfg(target_os = "macos")]
+    {
+        EffectsBuilder::new().effect(Effect::HudWindow).build()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        EffectsBuilder::new().effect(Effect::Acrylic).build()
+    }
 }
 
 pub(super) fn apply_acrylic(window: &WebviewWindow) {
     // Reapply at runtime as well as through tauri.conf.json. This covers
-    // dynamically-created note windows and Windows sessions where the effect
-    // is cleared while a transparent window is hidden and shown again.
+    // dynamically-created note windows and sessions where the effect is
+    // cleared while a transparent window is hidden and shown again.
     window.set_effects(acrylic_effects()).ok();
 }
 

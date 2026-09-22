@@ -48,7 +48,7 @@ pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
                 toggle_main(&handle).ok();
             }
         })
-        .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
+        .map_err(hotkey_unavailable)?;
     if let Some(shortcut) = quick_shortcut {
         let handle = app.clone();
         app.global_shortcut()
@@ -57,7 +57,7 @@ pub fn apply_hotkeys(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
                     toggle_quick_capture(&handle).ok();
                 }
             })
-            .map_err(|e| AppError::InvalidInput(format!("hotkey unavailable: {e}")))?;
+            .map_err(hotkey_unavailable)?;
     }
     Ok(())
 }
@@ -84,7 +84,7 @@ pub(super) fn spawn_hot_corner(app: AppHandle) {
                 std::thread::sleep(Duration::from_secs(1));
                 continue;
             }
-            let hit = hot_corner_hit(&cfg.hot_corner);
+            let hit = hot_corner_hit(&app, &cfg.hot_corner);
             if hit && armed {
                 let since = entered.get_or_insert_with(std::time::Instant::now);
                 if since.elapsed() >= Duration::from_millis(350) {
@@ -99,38 +99,111 @@ pub(super) fn spawn_hot_corner(app: AppHandle) {
         }
     });
 }
-#[cfg(windows)]
-fn hot_corner_hit(corner: &str) -> bool {
-    use windows::Win32::{
-        Foundation::POINT,
-        Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
-        UI::WindowsAndMessaging::GetCursorPos,
-    };
-    unsafe {
-        let mut p = POINT::default();
-        if GetCursorPos(&mut p).is_err() {
-            return false;
-        }
-        let monitor = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if GetMonitorInfoW(monitor, &mut info).as_bool() {
-            let r = info.rcWork;
-            match corner {
-                "top-left" => p.x <= r.left + 8 && p.y <= r.top + 8,
-                "top-right" => p.x >= r.right - 8 && p.y <= r.top + 8,
-                "bottom-left" => p.x <= r.left + 8 && p.y >= r.bottom - 8,
-                "bottom-right" => p.x >= r.right - 8 && p.y >= r.bottom - 8,
-                _ => false,
-            }
-        } else {
-            false
-        }
+
+fn hotkey_unavailable(err: impl std::fmt::Display) -> AppError {
+    #[cfg(target_os = "macos")]
+    {
+        AppError::InvalidInput(format!(
+            "快捷键不可用（{err}）。请在「系统设置 → 隐私与安全性 → 辅助功能」中允许 MayDolist"
+        ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        AppError::InvalidInput(format!("hotkey unavailable: {err}"))
     }
 }
-#[cfg(not(windows))]
-fn hot_corner_hit(_: &str) -> bool {
-    false
+
+fn hot_corner_hit(app: &AppHandle, corner: &str) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let Ok(pos) = window.cursor_position() else {
+        return false;
+    };
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+    monitors.iter().any(|monitor| {
+        let origin = monitor.position();
+        let size = monitor.size();
+        let left = origin.x as f64;
+        let top = origin.y as f64;
+        let right = left + f64::from(size.width);
+        let bottom = top + f64::from(size.height);
+        point_hits_corner(pos.x, pos.y, left, top, right, bottom, corner)
+    })
+}
+
+fn point_hits_corner(
+    x: f64,
+    y: f64,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+    corner: &str,
+) -> bool {
+    const PAD: f64 = 8.0;
+    match corner {
+        "top-left" => x <= left + PAD && y <= top + PAD,
+        "top-right" => x >= right - PAD && y <= top + PAD,
+        "bottom-left" => x <= left + PAD && y >= bottom - PAD,
+        "bottom-right" => x >= right - PAD && y >= bottom - PAD,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::point_hits_corner;
+
+    #[test]
+    fn hits_each_corner_inside_pad() {
+        assert!(point_hits_corner(
+            2.0, 2.0, 0.0, 0.0, 1920.0, 1080.0, "top-left"
+        ));
+        assert!(point_hits_corner(
+            1918.0,
+            1.0,
+            0.0,
+            0.0,
+            1920.0,
+            1080.0,
+            "top-right"
+        ));
+        assert!(point_hits_corner(
+            1.0,
+            1078.0,
+            0.0,
+            0.0,
+            1920.0,
+            1080.0,
+            "bottom-left"
+        ));
+        assert!(point_hits_corner(
+            1919.0,
+            1079.0,
+            0.0,
+            0.0,
+            1920.0,
+            1080.0,
+            "bottom-right"
+        ));
+    }
+
+    #[test]
+    fn ignores_center_and_unknown_corner() {
+        assert!(!point_hits_corner(
+            960.0,
+            540.0,
+            0.0,
+            0.0,
+            1920.0,
+            1080.0,
+            "top-right"
+        ));
+        assert!(!point_hits_corner(
+            0.0, 0.0, 0.0, 0.0, 1920.0, 1080.0, "off"
+        ));
+    }
 }

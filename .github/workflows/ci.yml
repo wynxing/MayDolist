@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/macos
   pull_request:
     branches:
       - main
@@ -73,3 +74,79 @@ jobs:
         run: |
           git diff --exit-code src/types/generated
           if ($LASTEXITCODE -ne 0) { Write-Error "src/types/generated is stale; run pnpm gen:types and commit" }
+
+  macos:
+    name: macOS unsigned app
+    if: github.ref_name == 'feat/macos' || github.head_ref == 'feat/macos'
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Run frontend unit tests
+        run: pnpm test
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build unsigned .app
+        run: pnpm tauri build --bundles app
+
+      - name: Stage Apple Silicon zip
+        id: stage
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+          mkdir -p artifacts
+          app_path="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$app_path" ]; then
+            echo "MayDolist.app was not found." >&2
+            exit 1
+          fi
+          ditto -c -k --keepParent "$app_path" "artifacts/MayDolist-macos-aarch64-${short_sha}.zip"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v7
+        with:
+          name: MayDolist-macos-${{ steps.stage.outputs.short_sha }}
+          path: artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 14

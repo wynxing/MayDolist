@@ -21,8 +21,26 @@ fn default_floating_note_glass_opacity() -> f64 {
     0.46
 }
 
+fn default_hotkey() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "Command+Option+M".into()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Alt+M".into()
+    }
+}
+
 fn default_quick_capture_hotkey() -> String {
-    "Ctrl+Alt+Space".into()
+    #[cfg(target_os = "macos")]
+    {
+        "Command+Option+Space".into()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Alt+Space".into()
+    }
 }
 
 fn default_quick_capture_enabled() -> bool {
@@ -213,7 +231,7 @@ impl Default for AppConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             data_dir: String::new(),
             hot_corner: "top-right".into(),
-            hotkey: "Ctrl+Alt+M".into(),
+            hotkey: default_hotkey(),
             quick_capture_hotkey: default_quick_capture_hotkey(),
             quick_capture_enabled: default_quick_capture_enabled(),
             github_stale_days: default_github_stale_days(),
@@ -284,7 +302,8 @@ mod tests {
     #[test]
     fn defaults_include_quick_capture_settings() {
         let config = AppConfig::default();
-        assert_eq!(config.quick_capture_hotkey, "Ctrl+Alt+Space");
+        assert_eq!(config.quick_capture_hotkey, default_quick_capture_hotkey());
+        assert_eq!(config.hotkey, default_hotkey());
         assert!(config.quick_capture_enabled);
         assert_eq!(config.github_stale_days, 14);
         assert!(config.github_sync_enabled);

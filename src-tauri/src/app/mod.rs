@@ -33,6 +33,11 @@ use windows::apply_acrylic;
 pub fn setup(app: &mut tauri::App) -> AppResult<()> {
     let handle = app.handle().clone();
     let config = app.state::<AppState>().storage.load_config()?;
+    #[cfg(target_os = "macos")]
+    if let Err(err) = apply_hotkeys(&handle, &config) {
+        app.state::<AppState>().log.log("error", &format!("{err}"));
+    }
+    #[cfg(not(target_os = "macos"))]
     apply_hotkeys(&handle, &config)?;
     build_tray(&handle)?;
     if std::env::args().any(|v| v == "--autostart") {

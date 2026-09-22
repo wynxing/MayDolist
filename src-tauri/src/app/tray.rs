@@ -35,6 +35,7 @@ pub(super) fn build_tray(app: &AppHandle) -> AppResult<()> {
     let handle = app.clone();
     TrayIconBuilder::with_id("main")
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .tooltip("MayDolist")
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "toggle" => {

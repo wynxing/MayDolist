@@ -78,9 +78,12 @@ pub fn backup_list(state: State<'_, AppState>) -> AppResult<Vec<BackupInfo>> {
 }
 
 #[tauri::command]
-pub fn backup_open_data_dir(state: State<'_, AppState>) -> AppResult<()> {
+pub fn backup_open_data_dir(state: State<'_, AppState>, app: AppHandle) -> AppResult<()> {
     let dir = state.storage.data_dir();
-    state.services.backup.open_data_dir()?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| AppError::Internal(format!("failed to open data dir: {e}")))?;
     state
         .log
         .log("info", &format!("opened data dir {}", dir.display()));

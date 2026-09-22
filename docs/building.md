@@ -83,6 +83,25 @@ git push origin v1.2.3
 
 应用不会打包或读取 GitHub token；GitHub 登录统一使用 `gh auth login`。
 
+## macOS 未公证构建（feat/macos）
+
+Mac 包走 ad-hoc 签名，不买 Apple Developer、不做公证，因此不能静默自动更新。`macos-latest` CI 上传的是 Apple Silicon `.app` zip。
+
+本地（必须在 macOS 上）：
+
+```bash
+pnpm tauri build --bundles app
+ditto -c -k --keepParent src-tauri/target/release/bundle/macos/MayDolist.app MayDolist-macos-aarch64.zip
+```
+
+第一次打开：
+
+1. 解压后右键 MayDolist.app → 打开 → 仍要打开；或运行 `xattr -cr /path/to/MayDolist.app` 后再双击。
+2. 全局快捷键需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许 MayDolist。
+3. GitHub 追踪依赖本机 `gh`（Homebrew 的 `/opt/homebrew/bin` 或 `/usr/local/bin` 会被自动加入 PATH）。
+
+到期提醒第一期只更新菜单栏徽标，不弹系统通知。Intel Mac 需要另打 x64 / universal，当前产物仅 aarch64。
+
 ## 玻璃透明度与配置升级
 
 设置页提供「玻璃透明度」主面板与悬浮便签两个滑块，范围 40%–100%，对应配置键：
