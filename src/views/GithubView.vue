@@ -196,15 +196,8 @@ function toggleCollapsed(watch: RepoWatch) {
   void s.setCollapsed(watch.fullName, !watch.collapsed);
 }
 
-function matchLabel(matches: string[]) {
-  return matches
-    .map((m) => {
-      if (m === "pinned") return "手动";
-      if (m === "all-prs") return "全部PR";
-      const found = filters.find((f) => f[0] === m);
-      return found ? found[1] : m;
-    })
-    .join(" · ");
+function isPinned(matches: string[]) {
+  return matches.includes("pinned");
 }
 
 function formatTime(iso: string) {
@@ -216,6 +209,21 @@ function formatTime(iso: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+const RELATIVE_CUTOFF_MS = 14 * 24 * 60 * 60 * 1000;
+
+function relativeTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const delta = Date.now() - date.getTime();
+  if (delta < 0 || delta > RELATIVE_CUTOFF_MS) return formatTime(iso);
+  const minutes = Math.floor(delta / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return `${Math.floor(hours / 24)}天前`;
 }
 
 async function ignorePr(repoName: string, pr: GhPullRequest) {
@@ -342,34 +350,39 @@ function convertLabel(key: string) {
       subtitle="追踪需要行动的 PR 与 Issue；转入待办后从本页消失，在待办里跟进。"
     >
       <template #actions>
+        <span
+          v-if="s.auth?.loggedIn"
+          class="gh-auth-inline"
+          :title="[s.auth.message, s.auth.version].filter(Boolean).join(' · ')"
+        >
+          <span class="auth-dot ok"></span>
+          <small>{{ s.auth.user || "已登录" }}</small>
+        </span>
         <button class="btn" type="button" :disabled="busy || !s.watchlist.length" @click="refresh">
           {{ busy ? "刷新中…" : "全部刷新" }}
         </button>
       </template>
     </PageHeader>
 
-    <div class="auth-card">
-      <span class="auth-dot" :class="{ ok: s.auth?.loggedIn }"></span>
-      <b>{{ s.auth?.message || "检测 GitHub CLI…" }}</b>
-      <small>{{ s.auth?.version }}</small>
-    </div>
+    <p v-if="!s.auth?.loggedIn" class="gh-auth-help" role="status">
+      {{ s.auth?.message || "检测 GitHub CLI…" }}
+    </p>
     <p v-if="syncSummaryText" class="gh-sync-summary" role="status">{{ syncSummaryText }}</p>
-    <div class="toolbar">
+    <div class="toolbar gh-toolbar">
       <input
         ref="repoInput"
         v-model="repo"
-        class="input"
+        class="input gh-repo-input"
         placeholder="owner/repo"
         @keyup.enter="addKey"
       />
       <button class="btn primary" type="button" @click="add">添加仓库</button>
-    </div>
-    <div v-if="s.watchlist.length" class="toolbar">
       <input
+        v-if="s.watchlist.length"
         v-model="textQuery"
-        class="input"
+        class="input gh-search-input"
         type="search"
-        placeholder="按标题 / 仓库名过滤（仅过滤本地快照）"
+        placeholder="按标题 / 仓库名过滤"
         aria-label="按标题或仓库名过滤"
       />
     </div>
@@ -401,12 +414,11 @@ function convertLabel(key: string) {
           @click="toggleCollapsed(watch)"
         >
           <span class="gh-chevron" aria-hidden="true">{{ watch.collapsed ? "▸" : "▾" }}</span>
-          <h3>{{ watch.fullName }}</h3>
-          <span class="snapshot-meta">{{ summary(watch) }}</span>
-          <small v-if="snapshotMeta(watch)" class="snapshot-time">{{ snapshotMeta(watch) }}</small>
+          <h3 class="gh-repo-name">{{ watch.fullName }}</h3>
+          <span class="gh-counts">{{ summary(watch) }}</span>
         </button>
         <button
-          class="btn"
+          class="btn compact"
           type="button"
           :disabled="repoBusy[watch.fullName]"
           :title="`刷新 ${watch.fullName}`"
@@ -414,10 +426,13 @@ function convertLabel(key: string) {
         >
           {{ repoBusy[watch.fullName] ? "刷新中…" : "刷新" }}
         </button>
-        <button class="btn danger" type="button" @click="pendingRemove = watch.fullName">
+        <button class="btn compact danger" type="button" @click="pendingRemove = watch.fullName">
           移除
         </button>
       </header>
+      <p v-if="!watch.collapsed && snapshotMeta(watch)" class="snapshot-time">
+        {{ snapshotMeta(watch) }}
+      </p>
       <ConfirmBar
         v-if="pendingRemove === watch.fullName"
         :message="`移除仓库 ${pendingRemove}？本地缓存会一并删除。`"
@@ -429,18 +444,20 @@ function convertLabel(key: string) {
 
       <template v-if="!watch.collapsed">
         <div class="gh-filters">
-          <button
-            class="btn ghost compact gh-filters-toggle"
-            type="button"
-            :aria-expanded="!!filtersOpen[watch.fullName]"
-            @click="filtersOpen[watch.fullName] = !filtersOpen[watch.fullName]"
-          >
-            {{ filtersOpen[watch.fullName] ? "收起筛选" : "筛选" }}
-          </button>
-          <p v-if="!filtersOpen[watch.fullName]" class="gh-empty">
-            {{ activeFilterSummary(watch) || "默认筛选" }}
-          </p>
-          <template v-else>
+          <div class="gh-filters-bar">
+            <button
+              class="btn ghost compact gh-filters-toggle"
+              type="button"
+              :aria-expanded="!!filtersOpen[watch.fullName]"
+              @click="filtersOpen[watch.fullName] = !filtersOpen[watch.fullName]"
+            >
+              {{ filtersOpen[watch.fullName] ? "收起筛选" : "筛选" }}
+            </button>
+            <span v-if="!filtersOpen[watch.fullName]" class="gh-filter-summary">
+              {{ activeFilterSummary(watch) || "默认筛选" }}
+            </span>
+          </div>
+          <template v-if="filtersOpen[watch.fullName]">
             <div class="filter-row">
               <label v-for="f in filters" :key="f[0]">
                 <input
@@ -471,29 +488,28 @@ function convertLabel(key: string) {
                 清除
               </button>
             </div>
+            <div class="gh-pin-row">
+              <input
+                v-model="pinDrafts[watch.fullName]"
+                class="input"
+                placeholder="#123 手动关注"
+                :disabled="pinBusy[watch.fullName]"
+                @keyup.enter="pinKey(watch.fullName, $event)"
+              />
+              <button
+                class="btn compact"
+                type="button"
+                :disabled="pinBusy[watch.fullName]"
+                @click="pinFromInput(watch.fullName)"
+              >
+                {{ pinBusy[watch.fullName] ? "添加中…" : "添加" }}
+              </button>
+            </div>
+            <p v-if="pinErrors[watch.fullName]" class="error">
+              {{ pinErrors[watch.fullName] }}
+            </p>
           </template>
         </div>
-
-        <div class="gh-pin-row">
-          <input
-            v-model="pinDrafts[watch.fullName]"
-            class="input"
-            placeholder="#123 手动关注"
-            :disabled="pinBusy[watch.fullName]"
-            @keyup.enter="pinKey(watch.fullName, $event)"
-          />
-          <button
-            class="btn"
-            type="button"
-            :disabled="pinBusy[watch.fullName]"
-            @click="pinFromInput(watch.fullName)"
-          >
-            {{ pinBusy[watch.fullName] ? "添加中…" : "添加" }}
-          </button>
-        </div>
-        <p v-if="pinErrors[watch.fullName]" class="error">
-          {{ pinErrors[watch.fullName] }}
-        </p>
 
         <template v-if="snapFor(watch)">
           <p v-if="snapFor(watch)!.lastError" class="error">
@@ -503,134 +519,140 @@ function convertLabel(key: string) {
             旧缓存：无行动信号字段，刷新后自动补全
           </p>
 
-          <h4>Pull Requests</h4>
-          <div
-            v-for="pr in visiblePrs(watch)"
-            :key="'pr-' + pr.number"
-            class="gh-item-row"
-            :class="{ dimmed: isClosed(pr.state) }"
-          >
-            <button class="gh-link" type="button" @click="s.open(pr.url)">
-              <span class="gh-title-block">
-                <span class="gh-title">
-                  #{{ pr.number }} {{ pr.title }}
-                  <span v-if="isClosed(pr.state)" class="gh-state-badge" :class="pr.state">
-                    {{ stateLabel(pr.state) }}
+          <div v-if="visiblePrs(watch).length" class="snapshot-section">
+            <h4>
+              Pull Requests
+              <span class="gh-section-count">{{ visiblePrs(watch).length }}</span>
+            </h4>
+            <div
+              v-for="pr in visiblePrs(watch)"
+              :key="'pr-' + pr.number"
+              class="gh-item-row"
+              :class="{ dimmed: isClosed(pr.state) }"
+            >
+              <button class="gh-link" type="button" :title="pr.title" @click="s.open(pr.url)">
+                <span class="gh-num">#{{ pr.number }}</span>
+                <span class="gh-title">{{ pr.title }}</span>
+                <span v-if="isClosed(pr.state)" class="gh-state-badge" :class="pr.state">
+                  {{ stateLabel(pr.state) }}
+                </span>
+                <span class="gh-signals">
+                  <span
+                    v-for="b in signalBadges(pr.signals)"
+                    :key="b.key"
+                    class="gh-signal-badge"
+                    :class="b.key"
+                  >
+                    {{ b.label }}
                   </span>
                 </span>
-                <span class="gh-item-meta-row">
-                  <span class="gh-signals">
-                    <span
-                      v-for="b in signalBadges(pr.signals)"
-                      :key="b.key"
-                      class="gh-signal-badge"
-                      :class="b.key"
-                    >
-                      {{ b.label }}
-                    </span>
-                  </span>
-                  <small class="gh-link-meta">
-                    {{ matchLabel(pr.matches) }} · 更新 {{ formatTime(pr.updatedAt) }}
-                  </small>
-                </span>
-              </span>
-            </button>
-            <div class="gh-item-actions row-actions">
-              <button
-                class="btn ghost gh-convert"
-                type="button"
-                title="转为 Todo（收件箱）"
-                :disabled="
-                  convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'saving'
-                "
-                @click="convertToTodo(watch.fullName, 'pr', pr)"
-              >
-                {{ convertLabel(convertKey(watch.fullName, "pr", pr.number)) }}
+                <span v-if="isPinned(pr.matches)" class="gh-pin-mark">手动</span>
+                <small class="gh-link-meta" :title="formatTime(pr.updatedAt)">
+                  {{ relativeTime(pr.updatedAt) }}
+                </small>
               </button>
-              <small
-                v-if="convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'"
-                class="error gh-convert-error"
-                :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
-              >
-                {{ convertState[convertKey(watch.fullName, "pr", pr.number)]!.message }}
-              </small>
-              <button
-                class="btn ghost gh-ignore"
-                type="button"
-                title="忽略"
-                @click="ignorePr(watch.fullName, pr)"
-              >
-                忽略
-              </button>
+              <div class="gh-item-actions">
+                <button
+                  class="btn ghost compact gh-convert"
+                  type="button"
+                  title="转为 Todo（收件箱）"
+                  :disabled="
+                    convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'saving'
+                  "
+                  @click="convertToTodo(watch.fullName, 'pr', pr)"
+                >
+                  {{ convertLabel(convertKey(watch.fullName, "pr", pr.number)) }}
+                </button>
+                <small
+                  v-if="
+                    convertState[convertKey(watch.fullName, 'pr', pr.number)]?.phase === 'error'
+                  "
+                  class="error gh-convert-error"
+                  :title="convertState[convertKey(watch.fullName, 'pr', pr.number)]!.message"
+                >
+                  {{ convertState[convertKey(watch.fullName, "pr", pr.number)]!.message }}
+                </small>
+                <button
+                  class="btn ghost compact gh-ignore"
+                  type="button"
+                  title="忽略"
+                  @click="ignorePr(watch.fullName, pr)"
+                >
+                  忽略
+                </button>
+              </div>
             </div>
           </div>
-          <p v-if="!visiblePrs(watch).length" class="gh-empty">暂无 PR，可用 #号 手动添加</p>
 
-          <h4>Issues</h4>
-          <div
-            v-for="issue in visibleIssues(watch)"
-            :key="'issue-' + issue.number"
-            class="gh-item-row"
-            :class="{ dimmed: isClosed(issue.state) }"
-          >
-            <button class="gh-link" type="button" @click="s.open(issue.url)">
-              <span class="gh-title-block">
-                <span class="gh-title">
-                  #{{ issue.number }} {{ issue.title }}
-                  <span v-if="isClosed(issue.state)" class="gh-state-badge" :class="issue.state">
-                    {{ stateLabel(issue.state) }}
+          <div v-if="visibleIssues(watch).length" class="snapshot-section">
+            <h4>
+              Issues
+              <span class="gh-section-count">{{ visibleIssues(watch).length }}</span>
+            </h4>
+            <div
+              v-for="issue in visibleIssues(watch)"
+              :key="'issue-' + issue.number"
+              class="gh-item-row"
+              :class="{ dimmed: isClosed(issue.state) }"
+            >
+              <button class="gh-link" type="button" :title="issue.title" @click="s.open(issue.url)">
+                <span class="gh-num">#{{ issue.number }}</span>
+                <span class="gh-title">{{ issue.title }}</span>
+                <span v-if="isClosed(issue.state)" class="gh-state-badge" :class="issue.state">
+                  {{ stateLabel(issue.state) }}
+                </span>
+                <span class="gh-signals">
+                  <span
+                    v-for="b in signalBadges(issue.signals)"
+                    :key="b.key"
+                    class="gh-signal-badge"
+                    :class="b.key"
+                  >
+                    {{ b.label }}
                   </span>
                 </span>
-                <span class="gh-item-meta-row">
-                  <span class="gh-signals">
-                    <span
-                      v-for="b in signalBadges(issue.signals)"
-                      :key="b.key"
-                      class="gh-signal-badge"
-                      :class="b.key"
-                    >
-                      {{ b.label }}
-                    </span>
-                  </span>
-                  <small class="gh-link-meta">
-                    {{ matchLabel(issue.matches) }} · 更新 {{ formatTime(issue.updatedAt) }}
-                  </small>
-                </span>
-              </span>
-            </button>
-            <div class="gh-item-actions row-actions">
-              <button
-                class="btn ghost gh-convert"
-                type="button"
-                title="转为 Todo（收件箱）"
-                :disabled="
-                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase ===
-                  'saving'
-                "
-                @click="convertToTodo(watch.fullName, 'issue', issue)"
-              >
-                {{ convertLabel(convertKey(watch.fullName, "issue", issue.number)) }}
+                <span v-if="isPinned(issue.matches)" class="gh-pin-mark">手动</span>
+                <small class="gh-link-meta" :title="formatTime(issue.updatedAt)">
+                  {{ relativeTime(issue.updatedAt) }}
+                </small>
               </button>
-              <small
-                v-if="
-                  convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase === 'error'
-                "
-                class="error gh-convert-error"
-                :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
-              >
-                {{ convertState[convertKey(watch.fullName, "issue", issue.number)]!.message }}
-              </small>
-              <button
-                class="btn ghost gh-ignore"
-                type="button"
-                title="忽略"
-                @click="ignoreIssue(watch.fullName, issue)"
-              >
-                忽略
-              </button>
+              <div class="gh-item-actions">
+                <button
+                  class="btn ghost compact gh-convert"
+                  type="button"
+                  title="转为 Todo（收件箱）"
+                  :disabled="
+                    convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase ===
+                    'saving'
+                  "
+                  @click="convertToTodo(watch.fullName, 'issue', issue)"
+                >
+                  {{ convertLabel(convertKey(watch.fullName, "issue", issue.number)) }}
+                </button>
+                <small
+                  v-if="
+                    convertState[convertKey(watch.fullName, 'issue', issue.number)]?.phase ===
+                    'error'
+                  "
+                  class="error gh-convert-error"
+                  :title="convertState[convertKey(watch.fullName, 'issue', issue.number)]!.message"
+                >
+                  {{ convertState[convertKey(watch.fullName, "issue", issue.number)]!.message }}
+                </small>
+                <button
+                  class="btn ghost compact gh-ignore"
+                  type="button"
+                  title="忽略"
+                  @click="ignoreIssue(watch.fullName, issue)"
+                >
+                  忽略
+                </button>
+              </div>
             </div>
           </div>
-          <p v-if="!visibleIssues(watch).length" class="gh-empty">暂无 Issue，可用 #号 手动添加</p>
+          <p v-if="!visiblePrs(watch).length && !visibleIssues(watch).length" class="gh-empty">
+            当前筛选下无条目
+          </p>
         </template>
         <p v-else class="gh-empty">尚未拉取数据，点「全部刷新」或添加 #号</p>
       </template>
